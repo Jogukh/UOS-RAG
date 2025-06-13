@@ -1,0 +1,55 @@
+# Core ML Libraries
+torch>=2.4.0
+torchvision>=0.19.0
+git+https://github.com/huggingface/transformers.git
+accelerate>=0.25.0
+optimum>=1.14.0
+auto-gptq>=0.7.0
+sentence-transformers>=2.2.2
+
+# VLM & Image Processing  
+Pillow>=10.0.0
+opencv-python>=4.8.0
+paddlepaddle>=2.5.0
+paddleocr>=2.7.0
+trocr>=0.1.0
+qwen-vl-utils>=0.0.10
+av>=10.0.0
+
+# Inference Optimization
+vllm>=0.7.2
+# flash-attn>=2.6.1  # Optional: for memory optimization
+
+# RAG & Vector DB
+langchain>=0.3.0
+langgraph>=0.2.0
+pgvector>=0.2.0
+psycopg2>=2.9.7
+faiss-cpu>=1.7.4
+
+# PDF Processing
+fitz  # PyMuPDF alternative name
+pdf2image>=1.16.0
+
+# API & Web
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# CUDA support (if available)
+# torch-audio
+# torchtext
+
+# Web UI & Dashboard
+solara>=1.35.0
+ipywidgets>=8.1.0
+
+# Development
+jupyterlab>=4.0.0
