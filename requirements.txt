@@ -1,10 +1,10 @@
-# Core ML Libraries
-torch>=2.4.0
-torchvision>=0.19.0
-git+https://github.com/huggingface/transformers.git
+# Core ML Libraries (PyTorch는 install_vllm.sh에서 환경별로 설치)
+# torch>=2.4.0  # 스크립트에서 환경별 설치
+# torchvision>=0.19.0  # 스크립트에서 환경별 설치
+# git+https://github.com/huggingface/transformers.git  # 스크립트에서 별도 설치
 accelerate>=0.25.0
 optimum>=1.14.0
-auto-gptq>=0.7.0
+# auto-gptq>=0.7.0  # Apple Silicon에서 문제 가능성, 필요시 수동 설치
 sentence-transformers>=2.2.2
 
 # VLM & Image Processing  
@@ -16,9 +16,15 @@ trocr>=0.1.0
 qwen-vl-utils>=0.0.10
 av>=10.0.0
 
-# Inference Optimization
-vllm>=0.7.2
+# High-Performance Inference with vLLM (스크립트에서 환경별로 설치)
+# vllm>=0.7.2  # 스크립트에서 환경별 설치
 # flash-attn>=2.6.1  # Optional: for memory optimization
+# xformers>=0.0.22  # Optional: for additional optimizations
+
+# vLLM 관련 추가 의존성
+ray>=2.8.0  # vLLM의 분산 처리
+ninja>=1.11.1  # 컴파일 최적화
+packaging>=21.0
 
 # RAG & Vector DB
 langchain>=0.3.0

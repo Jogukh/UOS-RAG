@@ -92,12 +92,16 @@ class VLMPatternWorkflow:
     
     def __init__(self, 
                  vector_analyzer: Optional[ArchitecturalVectorAnalyzer] = None,
-                 vlm_analyzer: Optional[QwenVLMAnalyzer] = None):
+                 vlm_analyzer: Optional[QwenVLMAnalyzer] = None,
+                 use_vllm: bool = True):
         """초기화"""
         
-        # 분석기 초기화
+        # 분석기 초기화 (vLLM 사용 옵션 포함)
         self.vector_analyzer = vector_analyzer or ArchitecturalVectorAnalyzer()
-        self.vlm_analyzer = vlm_analyzer or QwenVLMAnalyzer()
+        self.vlm_analyzer = vlm_analyzer or QwenVLMAnalyzer(use_vllm=use_vllm)
+        
+        # vLLM 사용 여부 저장
+        self.use_vllm = use_vllm
         
         # 체크포인터 설정
         self.checkpointer = MemorySaver() if HAS_LANGGRAPH else None
