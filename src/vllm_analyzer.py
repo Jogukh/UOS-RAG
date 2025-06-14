@@ -77,7 +77,7 @@ class VLLMAnalyzer:
             "swap_space": 4,   # CPU 메모리 스왑 공간 (GB)
         }
         
-        # 샘플링 파라미터 (Context7 문서 기반 최적화)
+        # 샘플링 파라미터 (vLLM 0.9+ 호환)
         self.default_sampling_params = SamplingParams(
             temperature=0.7,
             top_p=0.9,
@@ -85,9 +85,9 @@ class VLLMAnalyzer:
             stop_token_ids=None,
             frequency_penalty=0.1,
             presence_penalty=0.1,
-            # Context7 권장 추가 파라미터
-            repetition_penalty=1.05,  # 반복 방지
-            length_penalty=1.0,       # 길이 페널티
+            # 반복 방지 (vLLM 0.9+ 호환 파라미터)
+            repetition_penalty=1.05,
+            # length_penalty는 vLLM 0.9+에서 제거됨
         )
         
         # 건축 도면 분석용 프롬프트
@@ -219,27 +219,8 @@ class VLLMAnalyzer:
                     self.architectural_prompts["element_detection"]
                 )
             
-            # 이미지를 base64로 인코딩
-            buffer = BytesIO()
-            image.save(buffer, format='PNG')
-            image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            # vLLM 멀티모달 입력 구성
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url", 
-                            "image_url": {"url": f"data:image/png;base64,{image_base64}"}
-                        },
-                        {
-                            "type": "text", 
-                            "text": prompt
-                        }
-                    ]
-                }
-            ]
+            # vLLM 멀티모달 입력 구성 (최신 API 방식)
+            prompt_text = f"USER: <image>\n{prompt}\nASSISTANT:"
             
             # 샘플링 파라미터 설정
             if sampling_params is None:
@@ -247,11 +228,13 @@ class VLLMAnalyzer:
             
             logger.info(f"Running vLLM inference for {analysis_type}")
             
-            # vLLM 추론 실행
+            # vLLM 추론 실행 (Context7 최신 방식)
             outputs = self.model.generate(
-                prompts=[messages],
-                sampling_params=sampling_params,
-                use_tqdm=False
+                {
+                    "prompt": prompt_text,
+                    "multi_modal_data": {"image": image}
+                },
+                sampling_params=sampling_params
             )
             
             # 결과 추출

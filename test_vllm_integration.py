@@ -14,16 +14,55 @@ import time
 
 # 프로젝트 경로 추가
 sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).parent / "src"))
 
 try:
-    from vllm_analyzer import VLLMAnalyzer
-    from vllm_config import VLLMConfig, VLLMOptimizer
-    from qwen_vlm_analyzer_fixed import QwenVLMAnalyzer
-    from vlm_pattern_workflow_fixed import VLMPatternWorkflow
+    from src.unified_vlm_analyzer import UnifiedVLMAnalyzer
+    from src.vllm_config import VLLMConfig
+    from src.qwen_vlm_analyzer_fixed import QwenVLMAnalyzer
+    from src.vlm_pattern_workflow_fixed import VLMPatternWorkflow
     HAS_ANALYZERS = True
 except ImportError as e:
     HAS_ANALYZERS = False
     print(f"Warning: Analyzers not available: {e}")
+    # Fallback: import가 실패해도 기본 클래스 정의
+    class VLLMConfig:
+        def __init__(self):
+            self.base_config = {}
+    class UnifiedVLMAnalyzer:
+        def __init__(self, *args, **kwargs):
+            pass 기반 VLM 시스템 통합 테스트
+"""
+
+import os
+import sys
+import json
+import logging
+import asyncio
+from pathlib import Path
+from typing import List, Dict, Any
+import time
+
+# 프로젝트 경로 추가
+sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).parent / "src"))
+
+try:
+    from src.unified_vlm_analyzer import UnifiedVLMAnalyzer, create_analyzer
+    from src.vllm_config import VLLMConfig
+    from src.qwen_vlm_analyzer_fixed import QwenVLMAnalyzer
+    from src.vlm_pattern_workflow_fixed import VLMPatternWorkflow
+    HAS_ANALYZERS = True
+except ImportError as e:
+    HAS_ANALYZERS = False
+    print(f"Warning: Analyzers not available: {e}")
+    # Fallback: import가 실패해도 기본 클래스 정의
+    class VLLMConfig:
+        def __init__(self):
+            self.base_config = {}
+    class UnifiedVLMAnalyzer:
+        def __init__(self, **kwargs):
+            pass
 
 try:
     from PIL import Image, ImageDraw
@@ -37,11 +76,21 @@ logger = logging.getLogger(__name__)
 
 
 class VLLMTestSuite:
-    """vLLM 기반 VLM 시스템 테스트 스위트"""
+    """통합 VLM 시스템 테스트 스위트"""
     
     def __init__(self):
         self.config_manager = VLLMConfig()
         self.test_results = []
+        self.analyzer = None
+        
+    def setup_analyzer(self):
+        """통합 분석기 설정"""
+        try:
+            self.analyzer = create_analyzer()
+            return self.analyzer.load_model()
+        except Exception as e:
+            print(f"Failed to setup analyzer: {e}")
+            return False
         
     def create_test_images(self) -> List[Image.Image]:
         """테스트용 건축 도면 이미지 생성"""
@@ -112,10 +161,9 @@ class VLLMTestSuite:
             config = self.config_manager.auto_detect_config()
             
             # vLLM 분석기 초기화
-            analyzer = VLLMAnalyzer(
-                model_name=config.get("model_name", "Qwen/Qwen2.5-VL-7B-Instruct"),
-                tensor_parallel_size=config.get("tensor_parallel_size", 1),
-                gpu_memory_utilization=config.get("gpu_memory_utilization", 0.8)
+            analyzer = UnifiedVLMAnalyzer(
+                model_name=config.get("model_name", "Qwen/Qwen2.5-VL-3B-Instruct"),
+                engine_type="vllm"
             )
             
             # 모델 로드 테스트
@@ -263,7 +311,7 @@ class VLLMTestSuite:
             
             # vLLM 테스트 (사용 가능한 경우)
             try:
-                vllm_analyzer = VLLMAnalyzer()
+                vllm_analyzer = UnifiedVLMAnalyzer(engine_type="vllm")
                 if vllm_analyzer.load_model():
                     start_time = time.time()
                     vllm_result = vllm_analyzer.analyze_image(test_image, "element_detection")

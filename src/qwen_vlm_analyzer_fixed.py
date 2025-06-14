@@ -49,7 +49,7 @@ class QwenVLMAnalyzer:
         Qwen-VL 분석기 초기화
         
         Args:
-            model_path: Qwen-VL 모델 경로
+            model_path: Qwen-VL 모델 경로 또는 HuggingFace 모델명
             use_vllm: vLLM 사용 여부 (True: vLLM, False: transformers)
         """
         self.model = None
@@ -57,12 +57,16 @@ class QwenVLMAnalyzer:
         self.use_vllm = use_vllm and HAS_VLLM_DEPS
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # 기본 경로 설정
+        # 환경 설정에서 모델명 가져오기
         if model_path is None:
-            current_dir = Path(__file__).parent.parent
-            model_path = current_dir / "models" / "qwen_vlm_model"
+            try:
+                from .env_config import get_env_config
+                env_config = get_env_config()
+                model_path = env_config.get("model_name", "Qwen/Qwen2.5-VL-3B-Instruct")
+            except:
+                model_path = "Qwen/Qwen2.5-VL-3B-Instruct"
         
-        self.model_path = Path(model_path)
+        self.model_path = model_path  # HuggingFace 모델명 또는 로컬 경로
         
         # vLLM 설정
         if self.use_vllm:
@@ -181,8 +185,9 @@ class QwenVLMAnalyzer:
                 trust_remote_code=True,
                 low_cpu_mem_usage=True,
                 use_safetensors=True,
-                # Context7 권장 추가 최적화
-                attn_implementation="flash_attention_2" if self.device == "cuda" else "eager",
+                # FlashAttention 비활성화 (설치 문제로 인해)
+                # attn_implementation="flash_attention_2" if self.device == "cuda" else "eager",
+                attn_implementation="eager",  # 안전한 기본값
                 use_cache=True,  # KV 캐시 사용
             )
             
@@ -222,6 +227,10 @@ class QwenVLMAnalyzer:
                 logger.info("GPU memory cleaned up")
         except Exception as e:
             logger.warning(f"Error during memory cleanup: {e}")
+    
+    def cleanup(self):
+        """cleanup 메서드 추가 (backward compatibility)"""
+        self.cleanup_memory()
     
     def get_memory_usage(self) -> Dict[str, float]:
         """현재 메모리 사용량 반환"""
@@ -344,7 +353,7 @@ class QwenVLMAnalyzer:
     
     def _analyze_with_transformers(self, image: Image.Image, prompt_type: str,
                                   custom_prompt: str = None) -> Dict[str, Any]:
-        """transformers를 사용한 이미지 분석 (fallback)"""
+        """Context7 권장사항에 따른 Transformers 기반 분석"""
         try:
             # 프롬프트 선택
             if custom_prompt:
@@ -353,50 +362,70 @@ class QwenVLMAnalyzer:
                 prompt = self.analysis_prompts.get(prompt_type, 
                                                  self.analysis_prompts['architectural_basic'])
             
-            # 이미지 전처리 및 모델 입력 준비
+            # Context7 문서의 Qwen2.5-VL 표준 메시지 형식
             messages = [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "image", "image": image},
+                        {"type": "image", "image": image},  # PIL Image 직접 전달
                         {"type": "text", "text": prompt}
                     ]
                 }
             ]
             
-            # 입력 토큰화
+            # Context7 권장: apply_chat_template 사용
             text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True
             )
             
+            # Context7 문서의 process_vision_info 사용 시도
+            try:
+                from qwen_vl_utils import process_vision_info
+                image_inputs, video_inputs = process_vision_info(messages)
+                logger.info("Using qwen_vl_utils for vision processing")
+            except ImportError:
+                # qwen_vl_utils가 없으면 기본 처리
+                image_inputs = [image]
+                video_inputs = None
+                logger.info("Using basic image processing")
+            
+            # Context7 권장 입력 형식
             inputs = self.processor(
-                text=[text], 
-                images=[image], 
-                padding=True, 
+                text=[text],
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
                 return_tensors="pt"
             )
             
-            # GPU로 이동 (사용 가능한 경우)
-            if self.device == "cuda":
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            # GPU로 이동
+            inputs = inputs.to(self.device)
             
-            # 추론 실행
-            logger.info("Running transformers inference...")
+            # Context7 권장 생성 파라미터
+            logger.info("Running transformers inference with Context7 settings...")
             with torch.no_grad():
-                outputs = self.model.generate(
+                generated_ids = self.model.generate(
                     **inputs,
-                    max_new_tokens=1024,
+                    max_new_tokens=2048,  # Context7 권장값
                     do_sample=True,
                     temperature=0.7,
                     top_p=0.9,
+                    repetition_penalty=1.02,  # Context7 권장
                     pad_token_id=self.processor.tokenizer.eos_token_id
                 )
             
-            # 결과 디코딩
-            generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
-            response = self.processor.decode(
-                generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
-            )
+            # Context7 문서의 디코딩 방식
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            ]
+            
+            response = self.processor.batch_decode(
+                generated_ids_trimmed, 
+                skip_special_tokens=True, 
+                clean_up_tokenization_spaces=False  # Context7 권장
+            )[0]
             
             logger.info("Transformers analysis completed successfully")
             
@@ -411,6 +440,12 @@ class QwenVLMAnalyzer:
                 "prompt_type": prompt_type,
                 "raw_response": response,
                 "parsed_result": analysis_result,
+                "model_info": {
+                    "inference_type": "transformers",
+                    "device": self.device,
+                    "model_path": str(self.model_path)
+                }
+            }
                 "model_info": {
                     "inference_type": "transformers",
                     "device": self.device,

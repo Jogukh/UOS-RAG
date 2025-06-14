@@ -30,11 +30,11 @@ packaging>=21.0
 langchain>=0.3.0
 langgraph>=0.2.0
 pgvector>=0.2.0
-psycopg2>=2.9.7
+psycopg2-binary>=2.9.7  # Better compatibility on Linux
 faiss-cpu>=1.7.4
 
 # PDF Processing
-fitz  # PyMuPDF alternative name
+PyMuPDF>=1.23.0  # fitz is included in PyMuPDF
 pdf2image>=1.16.0
 
 # API & Web
@@ -48,6 +48,9 @@ pandas>=2.0.0
 tqdm>=4.66.0
 python-dotenv>=1.0.0
 requests>=2.31.0
+shapely>=2.0.0  # Geometric operations
+matplotlib>=3.7.0  # Plotting
+seaborn>=0.12.0  # Statistical visualization
 
 # CUDA support (if available)
 # torch-audio
