@@ -21,6 +21,11 @@ try:
     HAS_VLLM = True
 except ImportError as e:
     HAS_VLLM = False
+    # Define dummy classes for type hints when vLLM is not available
+    class SamplingParams:
+        pass
+    class LLM:
+        pass
     print(f"Warning: vLLM not available: {e}")
 
 try:
@@ -53,8 +58,14 @@ class VLLMAnalyzer:
             max_model_len: 최대 시퀀스 길이
             dtype: 데이터 타입 (bfloat16, float16, float32)
         """
-        if not HAS_VLLM or not HAS_DEPS:
-            raise ImportError("vLLM and dependencies are required")
+        if not HAS_VLLM:
+            logger.warning("vLLM is not available. VLLMAnalyzer will not function properly.")
+            self.model = None
+            self.tokenizer = None
+            return
+            
+        if not HAS_DEPS:
+            raise ImportError("PIL and torch dependencies are required")
         
         self.model_name = model_name
         self.model = None
@@ -164,6 +175,10 @@ class VLLMAnalyzer:
     
     def load_model(self) -> bool:
         """vLLM 모델 로드"""
+        if not HAS_VLLM:
+            logger.error("vLLM is not available")
+            return False
+            
         try:
             logger.info(f"Loading vLLM model: {self.model_name}")
             
@@ -204,6 +219,12 @@ class VLLMAnalyzer:
         Returns:
             분석 결과
         """
+        if not HAS_VLLM:
+            return {
+                "error": "vLLM is not available",
+                "message": "Please install vLLM to use this analyzer"
+            }
+            
         if not self.model:
             logger.warning("Model not loaded, attempting to load...")
             if not self.load_model():
@@ -282,6 +303,12 @@ class VLLMAnalyzer:
         Returns:
             분석 결과 리스트
         """
+        if not HAS_VLLM:
+            return [{
+                "error": "vLLM is not available",
+                "message": "Please install vLLM to use this analyzer"
+            }] * len(images)
+            
         if not self.model:
             if not self.load_model():
                 return [{"error": "Failed to load vLLM model"}] * len(images)
@@ -361,14 +388,21 @@ class VLLMAnalyzer:
     
     def get_model_info(self) -> Dict[str, Any]:
         """모델 정보 반환"""
-        return {
+        info = {
             "model_name": self.model_name,
             "engine": "vLLM",
-            "config": self.vllm_config,
             "loaded": self.model is not None,
-            "gpu_available": torch.cuda.is_available(),
-            "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0
+            "vllm_available": HAS_VLLM
         }
+        
+        if HAS_VLLM:
+            info.update({
+                "config": self.vllm_config,
+                "gpu_available": torch.cuda.is_available() if HAS_DEPS else False,
+                "gpu_count": torch.cuda.device_count() if HAS_DEPS and torch.cuda.is_available() else 0
+            })
+            
+        return info
     
     def cleanup(self):
         """리소스 정리"""
@@ -378,7 +412,7 @@ class VLLMAnalyzer:
                 del self.model
                 self.model = None
                 
-            if torch.cuda.is_available():
+            if HAS_DEPS and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
                 

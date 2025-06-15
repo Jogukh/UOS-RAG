@@ -10,9 +10,9 @@ sentence-transformers>=2.2.2
 # VLM & Image Processing  
 Pillow>=10.0.0
 opencv-python>=4.8.0
-paddlepaddle>=2.5.0
-paddleocr>=2.7.0
-trocr>=0.1.0
+# paddlepaddle>=2.5.0  # Apple Silicon에서 설치 문제 가능성
+# paddleocr>=2.7.0     # Apple Silicon에서 설치 문제 가능성
+# trocr>=0.1.0         # 패키지 없음, 제거
 qwen-vl-utils>=0.0.10
 av>=10.0.0
 

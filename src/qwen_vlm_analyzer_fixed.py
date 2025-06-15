@@ -446,12 +446,6 @@ class QwenVLMAnalyzer:
                     "model_path": str(self.model_path)
                 }
             }
-                "model_info": {
-                    "inference_type": "transformers",
-                    "device": self.device,
-                    "model_path": str(self.model_path)
-                }
-            }
             
         except Exception as e:
             logger.error(f"Transformers analysis failed: {e}")
