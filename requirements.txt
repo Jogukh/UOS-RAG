@@ -62,3 +62,7 @@ ipywidgets>=8.1.0
 
 # Development
 jupyterlab>=4.0.0
+
+chromadb
+sentence-transformers
+networkx>=3.0 # 그래프 자료구조 및 알고리즘

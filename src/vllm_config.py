@@ -20,6 +20,14 @@ class VLLMConfig:
         self.base_config = {
             # 모델 설정
             "model_configs": {
+                "qwen2.5-7b-text": {
+                    "model_name": "Qwen/Qwen2.5-7B-Instruct",
+                    "tensor_parallel_size": 1,
+                    "gpu_memory_utilization": 0.7,
+                    "max_model_len": 32768,  # 긴 컨텍스트 지원
+                    "dtype": "bfloat16",
+                    "trust_remote_code": True
+                },
                 "qwen2.5-vl-7b": {
                     "model_name": "Qwen/Qwen2.5-VL-7B-Instruct",
                     "tensor_parallel_size": 1,

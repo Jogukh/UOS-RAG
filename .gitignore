@@ -153,3 +153,9 @@ mcp_cache/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Database files
+chroma_db/
+*.db
+*.sqlite
+*.sqlite3
