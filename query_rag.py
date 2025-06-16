@@ -5,13 +5,6 @@ import os
 import sys
 from pathlib import Path
 
-import chromadb
-from chromadb.utils import embedding_functions
-import argparse
-import os
-import sys
-from pathlib import Path
-
 # vLLM 기반 텍스트 LLM 사용
 try:
     from vllm import LLM, SamplingParams
@@ -229,23 +222,12 @@ def generate_answer_with_llm(llm_components, query_text, retrieved_documents_tex
     try:
         outputs = llm.generate([chat_prompt], sampling_params)
         response_text = outputs[0].outputs[0].text.strip()
-        
+
         # 프롬프트 부분 제거하고 답변만 추출
         if len(response_text) > len(formatted_prompt):
             response_text = response_text[len(formatted_prompt):].strip()
-            
+
         return response_text
-        
-    except Exception as e:
-        return f"LLM 답변 생성 중 오류 발생: {e}"
-            
-            # 프롬프트 부분 제거 (생성된 텍스트에서 입력 프롬프트 제거)
-            if response_text.startswith(prompt):
-                response_text = response_text[len(prompt):].strip()
-            
-            return response_text.strip()
-        else:
-            return "현재 설정으로는 텍스트 기반 LLM 답변 생성이 지원되지 않습니다."
 
     except Exception as e:
         print(f"LLM 답변 생성 중 오류 발생: {e}")

@@ -58,27 +58,12 @@ def extract_text_from_pdf_page(page):
     """PDF 페이지에서 텍스트를 추출합니다."""
     try:
         text = page.get_text("text")
-        if not text.strip(): # 텍스트가 비어있으면 OCR 시도 (선택적)
+        if not text.strip():  # 텍스트가 비어있으면 OCR 시도 (선택적)
             # 여기에 OCR 로직 추가 가능 (예: Tesseract)
             # pix = page.get_pixmap()
             # img = Image.open(io.BytesIO(pix.tobytes("png")))
-            # text = pytesseract.image_to_string(img, lang='kor+eng') # 예시
-            pass # OCR은 현재 구현에서 제외
-        return text.strip()
-    except Exception as e:
-        print(f"      ⚠️ Error extracting text from page: {e}")
-        return ""
-
-def extract_text_from_pdf_page(page):
-    """PDF 페이지에서 텍스트를 추출합니다."""
-    try:
-        text = page.get_text("text")
-        if not text.strip(): # 텍스트가 비어있으면 OCR 시도 (선택적)
-            # 여기에 OCR 로직 추가 가능 (예: Tesseract)
-            # pix = page.get_pixmap()
-            # img = Image.open(io.BytesIO(pix.tobytes("png")))
-            # text = pytesseract.image_to_string(img, lang='kor+eng') # 예시
-            pass # OCR은 현재 구현에서 제외
+            # text = pytesseract.image_to_string(img, lang='kor+eng')  # 예시
+            pass  # OCR은 현재 구현에서 제외
         return text.strip()
     except Exception as e:
         print(f"      ⚠️ Error extracting text from page: {e}")
