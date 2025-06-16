@@ -29,9 +29,12 @@ packaging>=21.0
 # RAG & Vector DB
 langchain>=0.3.0
 langgraph>=0.2.0
+chromadb>=0.4.0
 pgvector>=0.2.0
 psycopg2-binary>=2.9.7  # Better compatibility on Linux
 faiss-cpu>=1.7.4
+# Web Search & Knowledge Enhancement
+tavily-python>=0.3.0
 
 # PDF Processing
 PyMuPDF>=1.23.0  # fitz is included in PyMuPDF
@@ -65,3 +68,12 @@ jupyterlab>=4.0.0
 
 chromadb
 networkx>=3.0 # 그래프 자료구조 및 알고리즘
+
+# LangChain/LangGraph packages
+langchain>=0.1.0
+langchain-core>=0.1.0  
+langchain-community>=0.0.20
+langgraph>=0.0.26
+langsmith>=0.0.80
+
+# LangChain/LangGraph packages
