@@ -1,0 +1,157 @@
+# DWG/DXF 파일 메타데이터 추출 프롬프트 템플릿
+
+## 기본 메타데이터 추출
+dwg_basic_metadata: |
+  당신은 건축 및 CAD 도면 분석 전문가입니다. 다음 CAD 도면의 구조적 정보를 바탕으로 기본 메타데이터를 추출해주세요.
+
+  {dwg_summary}
+
+  다음 형식으로 JSON 응답해주세요:
+  {{
+    "project_info": {{
+      "project_name": "프로젝트명 (파일명이나 텍스트에서 추정)",
+      "drawing_type": "도면 유형 (평면도, 입면도, 단면도, 상세도, 배치도 등)",
+      "drawing_purpose": "도면 목적 (설계도, 시공도, 상세도, 검토도 등)",
+      "scale": "축척 정보 (텍스트에서 추정)",
+      "discipline": "분야 (건축, 구조, 기계설비, 전기설비, 조경 등)"
+    }},
+    "drawing_metadata": {{
+      "title": "도면 제목 (추정)",
+      "description": "도면에 대한 간단한 설명",
+      "keywords": ["관련", "키워드", "목록"],
+      "building_type": "건물 유형 (주거, 상업, 공공, 산업, 교육 등)",
+      "complexity_level": "복잡도 (단순, 보통, 복잡, 매우복잡 중 하나)"
+    }}
+  }}
+
+## 도면 내용 분석
+dwg_content_analysis: |
+  당신은 건축 도면 해석 전문가입니다. 제공된 CAD 도면 정보를 바탕으로 도면의 내용을 상세히 분석해주세요.
+
+  === 도면 구조 정보 ===
+  {dwg_summary}
+
+  === 도면 내 텍스트 내용 ===
+  {text_summary}
+
+  다음 형식으로 JSON 응답해주세요:
+  {{
+    "content_analysis": {{
+      "main_elements": ["주요 구성 요소들 (벽, 문, 창, 계단 등)"],
+      "spatial_organization": "공간 구성 방식 설명",
+      "functional_areas": ["기능적 영역들 (거실, 침실, 사무실 등)"],
+      "technical_elements": ["기술적 요소들 (치수선, 심볼, 표기법 등)"]
+    }},
+    "dimensions_and_measurements": {{
+      "has_dimensions": true/false,
+      "dimension_types": ["치수 유형들 (길이, 각도, 반지름 등)"],
+      "measurement_units": "주요 측정 단위"
+    }},
+    "annotations": {{
+      "has_annotations": true/false,
+      "annotation_types": ["주석 유형들 (텍스트, 라벨, 심볼 등)"],
+      "key_annotations": ["중요한 주석 내용들"]
+    }}
+  }}
+
+## 건축적 특징 추출
+dwg_architectural_features: |
+  당신은 건축 설계 전문가입니다. 제공된 CAD 도면 정보를 바탕으로 건축적 특징을 분석해주세요.
+
+  === 도면 구조 ===
+  {dwg_summary}
+
+  === 레이어 정보 ===
+  주요 레이어: {layer_summary}
+
+  === 블록 정보 ===
+  주요 블록: {block_summary}
+
+  다음 형식으로 JSON 응답해주세요:
+  {{
+    "architectural_features": {{
+      "building_elements": ["건축 요소들 (벽체, 문, 창문, 계단, 지붕 등)"],
+      "structural_elements": ["구조 요소들 (기둥, 보, 슬래브, 기초 등)"],
+      "spatial_features": ["공간적 특징들 (동선, 조닝, 레벨차 등)"],
+      "design_patterns": ["설계 패턴들 (모듈러, 대칭, 반복 등)"]
+    }},
+    "construction_details": {{
+      "detail_level": "상세도 수준 (개략, 기본, 실시, 상세 중 하나)",
+      "construction_phases": ["건설 단계들 (기초, 골조, 마감 등)"],
+      "material_indications": ["재료 표시들 (콘크리트, 철골, 목재 등)"]
+    }},
+    "compliance_and_standards": {{
+      "drawing_standards": "도면 표준 (KS, ISO, ANSI 등 추정)",
+      "code_compliance": ["적용 가능한 기준들 (건축법, 소방법 등)"],
+      "professional_stamps": "전문가 도장 또는 인증 표시 여부"
+    }}
+  }}
+
+## DWG 관계 추론
+dwg_relationship_inference: |
+  당신은 건축 도면 관계 분석 전문가입니다. 여러 CAD 도면들 간의 관계를 분석하고 추론해주세요.
+
+  {context_information}
+
+  다음 형식으로 JSON 응답해주세요:
+  {{
+    "relationships": {{
+      "drawing_hierarchy": {{
+        "parent_drawings": ["상위 도면들"],
+        "child_drawings": ["하위 도면들"],
+        "sibling_drawings": ["동급 도면들"]
+      }},
+      "functional_relationships": {{
+        "plan_relationships": ["평면도 간 관계"],
+        "section_relationships": ["단면도 간 관계"],
+        "detail_relationships": ["상세도 간 관계"]
+      }},
+      "reference_relationships": {{
+        "cross_references": ["상호 참조 관계"],
+        "detail_callouts": ["상세 도면 호출"],
+        "section_markers": ["단면 표시 관계"]
+      }}
+    }},
+    "consistency_analysis": {{
+      "scale_consistency": "축척 일관성 분석",
+      "notation_consistency": "표기법 일관성 분석",
+      "standard_compliance": "표준 준수 분석"
+    }}
+  }}
+
+## RAG 콘텐츠 생성
+dwg_rag_content: |
+  당신은 건축 정보 관리 전문가입니다. 추출된 CAD 도면 메타데이터를 RAG 시스템에서 활용할 수 있는 구조화된 콘텐츠로 변환해주세요.
+
+  {metadata_json}
+
+  다음 형식으로 응답해주세요:
+
+  === 도면 기본 정보 ===
+  프로젝트: {프로젝트명}
+  도면 유형: {도면 유형}
+  분야: {해당 분야}
+  
+  === 도면 내용 ===
+  주요 구성 요소: {주요 요소들}
+  공간 구성: {공간 구성 방식}
+  기능적 영역: {기능적 영역들}
+  
+  === 기술적 사양 ===
+  파일 형식: {파일 형식}
+  축척: {축척 정보}
+  단위: {측정 단위}
+  복잡도: {복잡도 수준}
+  
+  === 건축적 특징 ===
+  건축 요소: {건축 요소들}
+  구조 요소: {구조 요소들}
+  설계 패턴: {설계 패턴들}
+  
+  === 검색 키워드 ===
+  {관련 키워드들}
+
+# 프롬프트 설정
+temperature: 0.1  # 일관성 있는 메타데이터 추출을 위한 낮은 온도
+max_tokens: 2048  # 충분한 응답 길이
+model_type: "analysis"  # 분석용 모델 타입

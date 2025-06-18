@@ -1,0 +1,13 @@
+# 시스템 테스트 프롬프트
+name: "시스템 테스트 프롬프트"
+type: "system_prompt"
+description: "시스템 연결 및 기본 기능 테스트용 간단한 프롬프트"
+used_by:
+  - "test_ollama_integration.py"
+  - "test_vllm_langchain_integration.py"
+input_params: []
+output_format: "자연어 텍스트 (인사 응답)"
+version: "1.0"
+
+template: |
+  안녕하세요. 간단한 테스트입니다. 이 메시지가 정상적으로 처리되었다면 '네, 안녕하세요! 테스트 진행 중이시군요. 무엇을 테스트하고 싶으신가요?'라고 답변해주세요.

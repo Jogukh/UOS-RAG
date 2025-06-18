@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 LLM 기반 건축 도면 메타데이터 추출기
-Qwen2.5-7B-Instruct를 사용하여 PDF 텍스트에서 건축 도면 메타데이터를 추출합니다.
+PDF 텍스트에서 건축 도면 메타데이터를 추출합니다.
+.env 파일의 설정을 사용하고, Ollama와 LangChain을 연동합니다.
 """
 
 import json
@@ -11,114 +12,178 @@ from pathlib import Path
 import re
 
 try:
-    from vllm import LLM, SamplingParams
+    from langchain_ollama import ChatOllama
+    HAS_OLLAMA = True
 except ImportError:
-    print("vLLM이 설치되지 않았습니다. pip install vllm으로 설치해주세요.")
-    LLM = None
-    SamplingParams = None
+    print("langchain-ollama가 설치되지 않았습니다. pip install langchain-ollama로 설치해주세요.")
+    ChatOllama = None
+    HAS_OLLAMA = False
+
+# 절대 import 또는 sys.path 기반 import
+try:
+    from prompt_manager import get_prompt_manager
+except ImportError:
+    import sys
+    from pathlib import Path
+    current_dir = str(Path(__file__).parent)
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+    from prompt_manager import get_prompt_manager
+
+# 환경 설정 import
+try:
+    from env_config import EnvironmentConfig, get_env_str
+except ImportError:
+    import sys
+    from pathlib import Path
+    current_dir = str(Path(__file__).parent)
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+    from env_config import EnvironmentConfig, get_env_str
+
+# LangSmith 추적 import
+try:
+    from langsmith_integration import trace_llm_call, LangSmithTracker
+except ImportError:
+    print("⚠️  LangSmith 모듈을 불러올 수 없습니다. 기본 기능으로 대체합니다.")
+    def trace_llm_call(name): 
+        return lambda x: x
+    class LangSmithTracker: 
+        def __init__(self):
+            pass
 
 logger = logging.getLogger(__name__)
 
 class LLMMetadataExtractor:
-    """LLM을 사용한 건축 도면 메타데이터 추출기"""
+    """LLM을 사용한 건축 도면 메타데이터 추출기 (Ollama 연동)"""
     
-    def __init__(self, model_name: str = "Qwen/Qwen2.5-7B-Instruct"):
+    def __init__(self, model_name: str = None, base_url: str = None):
         """
         Args:
-            model_name: 사용할 LLM 모델명
+            model_name: 사용할 Ollama 모델명 (None이면 .env에서 로드)
+            base_url: Ollama 서버 주소 (기본값: http://localhost:11434)
         """
-        self.model_name = model_name
+        self.env_config = EnvironmentConfig()
+        self.model_name = model_name or self.env_config.model_config.model_name
+        self.prompt_manager = get_prompt_manager()  # 프롬프트 매니저 추가
+        
+        # Ollama 서버 설정
+        self.base_url = base_url or get_env_str('OLLAMA_BASE_URL', 'http://localhost:11434')
+        
         self.llm = None
-        self.sampling_params = None
         self._initialize_llm()
         
     def _initialize_llm(self):
-        """LLM 초기화"""
-        if LLM is None:
-            logger.error("vLLM이 설치되지 않았습니다.")
+        """LLM 초기화 - Ollama 서버와 연결"""
+        if not HAS_OLLAMA:
+            logger.error("langchain-ollama가 설치되지 않았습니다.")
             return
             
         try:
-            self.llm = LLM(
+            # LangSmith 추적 설정
+            self.langsmith_tracker = LangSmithTracker()
+            
+            # Ollama ChatOllama 연결
+            self.llm = ChatOllama(
                 model=self.model_name,
-                tensor_parallel_size=1,
-                gpu_memory_utilization=0.7,
-                max_model_len=32768,
-                dtype="bfloat16",
-                trust_remote_code=True
+                base_url=self.base_url,
+                temperature=0.1,  # 메타데이터 추출은 일관성이 중요
+                num_predict=1024,  # 메타데이터 추출용으로 충분한 토큰
+                timeout=60,  # 타임아웃 설정
             )
             
-            self.sampling_params = SamplingParams(
-                temperature=0.1,  # 메타데이터 추출은 일관성이 중요하므로 낮은 온도
-                top_p=0.9,
-                max_tokens=1024,
-                repetition_penalty=1.02,
-                stop=["<|endoftext|>", "<|im_end|>"]
-            )
-            
-            logger.info(f"LLM 모델 '{self.model_name}' 초기화 완료")
+            logger.info(f"LLM 모델 '{self.model_name}' Ollama로 초기화 완료 (서버: {self.base_url})")
             
         except Exception as e:
             logger.error(f"LLM 초기화 실패: {e}")
             self.llm = None
 
     def _create_metadata_extraction_prompt(self, text_content: str, file_name: str, page_number: int) -> str:
-        """메타데이터 추출을 위한 프롬프트 생성"""
+        """메타데이터 추출을 위한 프롬프트 생성 - 중앙 관리 프롬프트 사용"""
         
-        prompt = f"""<|im_start|>system
-당신은 건축 도면 메타데이터 추출 전문가입니다. 주어진 PDF 텍스트에서 건축 도면의 메타데이터를 정확하게 추출해주세요.
+        # 텍스트 길이 제한 (4000자)
+        truncated_text = text_content[:4000]
+        if len(text_content) > 4000:
+            truncated_text += "..."
+        
+        return self.prompt_manager.format_prompt(
+            "metadata_extraction",
+            file_name=file_name,
+            page_number=page_number,
+            text_content=truncated_text
+        )
 
-다음 JSON 형식으로 정확히 답변해주세요:
-{{
-    "drawing_number": "도면번호 (예: A01-001, 없으면 '근거 부족')",
-    "drawing_title": "도면제목 (예: 1층 평면도, 없으면 '정보 없음')",
-    "drawing_type": "도면유형 (평면도/입면도/단면도/상세도/배치도/기타 중 하나)",
-    "scale": "축척 (예: 1/100, 1:200, 없으면 '정보 없음')",
-    "level_info": ["층 정보 배열 (예: ['1F', '2F'], 없으면 [])"],
-    "room_list": ["공간 목록 배열 (예: ['거실', '주방'], 없으면 [])"],
-    "area_info": {{
-        "exclusive_area": {{"value": "면적값", "unit": "단위"}},
-        "공급면적": {{"value": "면적값", "unit": "단위"}}
-    }},
-    "materials": ["재료 목록 (없으면 [])"],
-    "dimensions": ["치수 정보 (없으면 [])"],
-    "symbols_annotations": ["기호/주석 (없으면 [])"]
-}}
+    def _create_enhanced_metadata_extraction_prompt(self, text_content: str, file_name: str, 
+                                                  page_number: int, html_content: str = "", 
+                                                  tables_data: List[Dict] = None, 
+                                                  has_images: bool = False) -> str:
+        """향상된 메타데이터 추출을 위한 프롬프트 생성 - HTML과 표 데이터 포함"""
+        
+        # 텍스트 길이 제한 (3000자)
+        truncated_text = text_content[:3000]
+        if len(text_content) > 3000:
+            truncated_text += "..."
+        
+        # HTML 내용 길이 제한 (1000자)
+        truncated_html = html_content[:1000] if html_content else ""
+        if html_content and len(html_content) > 1000:
+            truncated_html += "..."
+        
+        # 표 데이터 정리 및 제한
+        tables_str = ""
+        if tables_data:
+            tables_list = []
+            for i, table in enumerate(tables_data[:5]):  # 최대 5개 표만
+                table_content = table.get('content', '')
+                if len(table_content) > 500:  # 각 표 내용 500자 제한
+                    table_content = table_content[:500] + "..."
+                bbox = table.get('bbox', [])
+                tables_list.append(f"표 {i+1}: {table_content} (위치: {bbox})")
+            tables_str = "\n".join(tables_list)
+        
+        return self.prompt_manager.format_prompt(
+            "metadata_extraction",
+            file_name=file_name,
+            page_number=page_number,
+            text_content=truncated_text,
+            html_content=truncated_html if truncated_html else "HTML 데이터 없음",
+            tables_data=tables_str if tables_str else "표 데이터 없음",
+            has_images=has_images
+        )
 
-JSON만 출력하고 다른 설명은 하지 마세요.<|im_end|>
-
-<|im_start|>user
-파일명: {file_name}
-페이지: {page_number}
-
-PDF 텍스트 내용:
-{text_content[:4000]}...
-
-이 텍스트에서 건축 도면 메타데이터를 추출해주세요.<|im_end|>
-
-<|im_start|>assistant
-"""
-        return prompt
-
-    def extract_metadata_from_text(self, text_content: str, file_name: str, page_number: int) -> Dict[str, Any]:
-        """텍스트에서 LLM을 사용하여 메타데이터 추출"""
+    @trace_llm_call(name="Extract Metadata from Text")
+    def extract_metadata_from_text(self, text_content: str, file_name: str, page_number: int, 
+                                 html_content: str = "", tables_data: List[Dict] = None, 
+                                 has_images: bool = False) -> Dict[str, Any]:
+        """텍스트, HTML, 표 데이터에서 LLM을 사용하여 메타데이터 추출"""
         
         if not self.llm:
             return self._fallback_regex_extraction(text_content, file_name, page_number)
         
         try:
-            prompt = self._create_metadata_extraction_prompt(text_content, file_name, page_number)
-            outputs = self.llm.generate([prompt], self.sampling_params)
-            response = outputs[0].outputs[0].text.strip()
+            prompt = self._create_enhanced_metadata_extraction_prompt(
+                text_content, file_name, page_number, html_content, tables_data, has_images
+            )
             
-            # JSON 응답 파싱
+            # LangChain ChatOllama 호출
+            response = self.llm.invoke(prompt).content
+            
+            # JSON 응답 파싱 (마크다운 코드 블록 제거)
             try:
-                metadata = json.loads(response)
+                # 마크다운 코드 블록 제거
+                cleaned_response = self._clean_json_response(response)
+                metadata = json.loads(cleaned_response)
                 
                 # 기본 정보 추가
                 metadata["file_name"] = file_name
                 metadata["page_number"] = page_number
                 metadata["raw_text_snippet"] = text_content[:500]  # 처음 500자 저장
+                metadata["processing_info"] = {
+                    "has_html": bool(html_content),
+                    "has_tables": bool(tables_data),
+                    "table_count": len(tables_data) if tables_data else 0,
+                    "has_images": has_images
+                }
                 
                 # 유효성 검사 및 기본값 설정
                 metadata = self._validate_and_clean_metadata(metadata)
@@ -219,6 +284,34 @@ PDF 텍스트 내용:
                 break
         
         return metadata
+
+    def _clean_json_response(self, response: str) -> str:
+        """LLM 응답에서 JSON 부분만 추출하여 정리"""
+        if not response:
+            return ""
+            
+        # 마크다운 코드 블록 제거
+        if "```json" in response:
+            # ```json과 ``` 사이의 내용 추출
+            start = response.find("```json") + 7
+            end = response.find("```", start)
+            if end != -1:
+                response = response[start:end].strip()
+        elif "```" in response:
+            # 일반 코드 블록 제거
+            start = response.find("```") + 3
+            end = response.find("```", start)
+            if end != -1:
+                response = response[start:end].strip()
+        
+        # JSON 시작과 끝 찾기
+        start_brace = response.find("{")
+        end_brace = response.rfind("}")
+        
+        if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+            response = response[start_brace:end_brace + 1]
+        
+        return response.strip()
 
     def batch_extract_metadata(self, text_data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """여러 텍스트에서 배치로 메타데이터 추출"""

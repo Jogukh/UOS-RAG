@@ -5,20 +5,45 @@ import os
 import sys
 from pathlib import Path
 
-# vLLM 기반 텍스트 LLM 사용
+# .env 설정 로드
+sys.path.append(str(Path(__file__).parent / "src"))
+try:
+    from env_config import get_env_config
+    env_config = get_env_config()
+    print(f"📋 .env 기반 설정 로드됨 - 모델: {env_config.model_config.model_name}")
+    HAS_ENV_CONFIG = True
+except ImportError:
+    print("⚠️  env_config를 불러올 수 없습니다. 기본 설정을 사용합니다.")
+    env_config = None
+    HAS_ENV_CONFIG = False
+
+# Ollama API 사용
+try:
+    import requests
+    import json
+    HAS_OLLAMA = True
+except ImportError as e:
+    print(f"requests를 import하는 데 실패했습니다: {e}")
+    print("질의응답 시 LLM 답변 생성 기능이 제한될 수 있습니다.")
+    HAS_OLLAMA = False
+
+# vLLM 기반 텍스트 LLM 사용 (백업용)
 try:
     from vllm import LLM, SamplingParams
     HAS_VLLM = True
 except ImportError as e:
     print(f"vLLM을 import하는 데 실패했습니다: {e}")
-    print("질의응답 시 LLM 답변 생성 기능이 제한될 수 있습니다.")
+    print("vLLM 백업 기능이 제한될 수 있습니다.")
     HAS_VLLM = False
 
-# 상수 정의
+# 상수 정의 (.env에서 가져오거나 기본값 사용)
 CHROMA_DB_PATH = "./chroma_db"
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-LLM_MODEL_PATH = "Qwen/Qwen2.5-7B-Instruct"  # 텍스트 전용 모델
+LLM_MODEL_PATH = env_config.model_config.model_name if HAS_ENV_CONFIG else "Qwen/Qwen2.5-7B-Instruct"
 PROMPT_FILE_PATH = Path(__file__).parent / "src" / "prompt.md"
+
+# 프롬프트 매니저 import
+from src.prompt_manager import get_prompt_manager
 
 def load_prompt_template(file_path: Path) -> str:
     """지정된 파일 경로에서 프롬프트 템플릿을 로드합니다."""
@@ -33,23 +58,9 @@ def load_prompt_template(file_path: Path) -> str:
         return get_default_prompt()
 
 def get_default_prompt() -> str:
-    """기본 프롬프트 반환"""
-    return """당신은 건축 도면 및 프로젝트 문서를 분석하고 질문에 답변하는 AI 어시스턴트입니다.
-주어진 건축 도면 정보를 바탕으로 다음 질문에 명확하고 간결하게 답변해주세요.
-
-제공된 정보:
----
-{retrieved_documents_text}
----
-
-질문: {query_text}
-
-답변 생성 시 다음 사항을 유의해주세요:
-1. 답변은 반드시 제공된 정보에 근거해야 합니다.
-2. 관련된 정보가 없다면, 추측하지 말고 "제공된 정보로는 답변할 수 없습니다."라고 명확히 밝혀주세요.
-3. 가능하다면 답변에 관련된 핵심 도면 정보(예: 문서 ID, 도면명)를 간략히 언급해주세요.
-
-답변:"""
+    """기본 프롬프트 반환 - 중앙 관리 프롬프트 매니저 사용"""
+    prompt_manager = get_prompt_manager()
+    return prompt_manager.get_prompt("rag_query").template
 
 def get_available_collections():
     """사용 가능한 ChromaDB 컬렉션 목록을 반환합니다."""
@@ -81,8 +92,7 @@ def query_rag_database(query_text, n_results=3, project_name=None):
         # 지정된 프로젝트 컬렉션 검색
         try:
             collection = client.get_collection(
-                name=collection_name,
-                embedding_function=sentence_transformer_ef
+                name=collection_name
             )
             print(f"프로젝트 '{project_name}' 컬렉션에서 검색 중...")
         except Exception as e:
@@ -109,8 +119,7 @@ def query_rag_database(query_text, n_results=3, project_name=None):
         for col_name in drawings_collections:
             try:
                 collection = client.get_collection(
-                    name=col_name,
-                    embedding_function=sentence_transformer_ef
+                    name=col_name
                 )
                 
                 results = collection.query(
@@ -163,42 +172,54 @@ def query_rag_database(query_text, n_results=3, project_name=None):
         return None
 
 def initialize_llm():
-    """vLLM 기반 텍스트 LLM을 초기화합니다."""
-    if not HAS_VLLM:
-        print("vLLM이 없어 LLM 초기화를 건너뜁니다.")
+    """Ollama API 기반 텍스트 LLM을 초기화합니다."""
+    if not HAS_OLLAMA:
+        print("requests가 없어 LLM 초기화를 건너뜁니다.")
         return None
+    
+    # Ollama 서버 연결 테스트
+    ollama_url = "http://localhost:11434"
+    model_name = LLM_MODEL_PATH  # gemma3:12b-it-qat
+    
     try:
-        llm = LLM(
-            model=LLM_MODEL_PATH,
-            tensor_parallel_size=1,
-            gpu_memory_utilization=0.7,
-            max_model_len=32768,
-            dtype="bfloat16",
-            trust_remote_code=True
-        )
-        
-        sampling_params = SamplingParams(
-            temperature=0.3,
-            top_p=0.8,
-            max_tokens=2048,
-            repetition_penalty=1.02,
-            stop=["<|endoftext|>", "<|im_end|>"]
-        )
-        
-        print(f"LLM 모델 '{LLM_MODEL_PATH}'이 성공적으로 로드되었습니다.")
-        return {"llm": llm, "sampling_params": sampling_params}
-        
+        # Ollama 서버 상태 확인
+        response = requests.get(f"{ollama_url}/api/tags")
+        if response.status_code == 200:
+            models = response.json().get('models', [])
+            model_names = [model['name'] for model in models]
+            
+            if model_name in model_names:
+                print(f"✅ Ollama 모델 '{model_name}'이 사용 가능합니다.")
+                return {
+                    "ollama_url": ollama_url,
+                    "model_name": model_name,
+                    "type": "ollama"
+                }
+            else:
+                print(f"❌ 모델 '{model_name}'을 찾을 수 없습니다.")
+                print(f"사용 가능한 모델들: {model_names}")
+                return None
+        else:
+            print(f"❌ Ollama 서버에 연결할 수 없습니다. 상태 코드: {response.status_code}")
+            return None
+            
+    except requests.exceptions.ConnectionError:
+        print("❌ Ollama 서버가 실행되지 않았습니다. 'ollama serve' 명령으로 서버를 시작하세요.")
+        return None
     except Exception as e:
-        print(f"LLM 초기화 중 오류 발생: {e}")
+        print(f"❌ LLM 초기화 중 오류 발생: {e}")
         return None
 
 def generate_answer_with_llm(llm_components, query_text, retrieved_documents_text):
-    """검색된 문서를 바탕으로 vLLM을 사용하여 답변을 생성합니다."""
+    """검색된 문서를 바탕으로 Ollama API를 사용하여 답변을 생성합니다."""
     if not llm_components:
         return "LLM이 초기화되지 않아 답변을 생성할 수 없습니다."
 
-    llm = llm_components["llm"]
-    sampling_params = llm_components["sampling_params"]
+    if llm_components.get("type") != "ollama":
+        return "Ollama API가 아닌 다른 LLM 타입은 지원되지 않습니다."
+    
+    ollama_url = llm_components["ollama_url"]
+    model_name = llm_components["model_name"]
     
     # 프롬프트 파일에서 템플릿 로드
     prompt_template = load_prompt_template(PROMPT_FILE_PATH)
@@ -209,28 +230,39 @@ def generate_answer_with_llm(llm_components, query_text, retrieved_documents_tex
         query_text=query_text
     )
     
-    # Qwen2.5 채팅 형식으로 감싸기
-    chat_prompt = f"""<|im_start|>system
-당신은 건축 도면 분석 전문가입니다. 주어진 도면 정보를 바탕으로 정확하고 유용한 답변을 제공해주세요.<|im_end|>
-
-<|im_start|>user
-{formatted_prompt}<|im_end|>
-
-<|im_start|>assistant
-"""
+    # Ollama API 요청 데이터
+    request_data = {
+        "model": model_name,
+        "prompt": formatted_prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.3,
+            "top_p": 0.8,
+            "num_predict": 2048
+        }
+    }
 
     try:
-        outputs = llm.generate([chat_prompt], sampling_params)
-        response_text = outputs[0].outputs[0].text.strip()
+        # Ollama API 호출
+        response = requests.post(
+            f"{ollama_url}/api/generate",
+            json=request_data,
+            timeout=60  # 60초로 늘림
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            response_text = result.get("response", "").strip()
+            return response_text
+        else:
+            print(f"❌ Ollama API 오류. 상태 코드: {response.status_code}")
+            print(f"응답: {response.text}")
+            return f"LLM API 호출 실패: {response.status_code}"
 
-        # 프롬프트 부분 제거하고 답변만 추출
-        if len(response_text) > len(formatted_prompt):
-            response_text = response_text[len(formatted_prompt):].strip()
-
-        return response_text
-
+    except requests.exceptions.Timeout:
+        return "LLM 응답 시간이 초과되었습니다."
     except Exception as e:
-        print(f"LLM 답변 생성 중 오류 발생: {e}")
+        print(f"❌ LLM 답변 생성 중 오류 발생: {e}")
         return f"LLM 답변 생성 중 오류가 발생했습니다: {str(e)}"
 
 def display_results(results, llm_analyzer=None, original_query=None):

@@ -1,11 +1,14 @@
 """
 LangGraph 워크플로우 상태 정의 및 관리
+.env 파일 기반 설정 지원
 """
 from typing import List, Dict, Any, Optional, Annotated
 from typing_extensions import TypedDict
 from datetime import datetime
 import operator
 from enum import Enum
+
+from env_config import get_env_config
 
 class WorkflowStage(Enum):
     """워크플로우 단계 정의"""
@@ -79,10 +82,23 @@ class PerformanceMetrics(TypedDict):
 def create_initial_state(
     uploads_dir: str,
     target_files: List[str],
-    config: Dict[str, Any]
+    config: Dict[str, Any] = None
 ) -> WorkflowState:
-    """초기 워크플로우 상태 생성"""
+    """초기 워크플로우 상태 생성 - .env 설정 사용"""
     workflow_id = f"workflow_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    # .env 설정을 기본값으로 사용
+    if config is None:
+        env_config = get_env_config()
+        config = {
+            'max_retries': 3,
+            'model_name': env_config.model_config.model_name,
+            'vllm_config': env_config.get_vllm_config(),
+            'sampling_params': env_config.get_sampling_params(),
+            'reranker_config': env_config.reranker_config,
+            'logging_config': env_config.logging_config,
+            'api_config': env_config.api_config
+        }
     
     return WorkflowState(
         workflow_id=workflow_id,

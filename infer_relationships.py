@@ -2,6 +2,7 @@
 """
 도면 간의 의미 관계를 추론하고 프로젝트별로 그래프를 저장하는 스크립트
 LLM(Qwen2.5-7B-Instruct) 기반 관계 추론 + 규칙 기반 추론 결합
+.env 파일 기반 설정 사용
 """
 
 import json
@@ -16,6 +17,7 @@ import sys
 sys.path.append(str(Path(__file__).parent / "src"))
 try:
     from llm_relationship_inferencer import LLMDrawingRelationshipInferencer
+    from env_config import get_env_config
     LLM_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️  LLM 관계 추론기를 불러올 수 없습니다: {e}")

@@ -3,8 +3,19 @@ import chromadb
 from chromadb.utils import embedding_functions
 import os
 from pathlib import Path
+import sys
 
-# 상수 정의
+# .env 설정 로드
+sys.path.append(str(Path(__file__).parent / "src"))
+try:
+    from env_config import get_env_config
+    env_config = get_env_config()
+    print(f"📋 .env 기반 설정 로드됨 - 모델: {env_config.model_config.model_name}")
+except ImportError:
+    print("⚠️  env_config를 불러올 수 없습니다. 기본 설정을 사용합니다.")
+    env_config = None
+
+# 상수 정의 (.env에서 가져오거나 기본값 사용)
 UPLOADS_ROOT_DIR = Path("uploads")
 METADATA_BASE_FILENAME = "project_metadata"
 CHROMA_DB_PATH = "./chroma_db"

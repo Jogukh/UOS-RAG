@@ -1,0 +1,154 @@
+name: "PDF 표 기반 공동주택 메타데이터 추출"
+type: "metadata_extraction"
+description: >
+  CAD로 작성된 ‘기둥·슬래브 일람표’, ‘보일람표’, ‘설계개요’ PDF를
+  unstructuredPDFLoader(hi_res, infer_table_structure=True)로 파싱한 뒤,
+  LLM에게 완전한 JSON 메타데이터를 생성하도록 지시하는 고급 프롬프트.
+used_by:
+  - "llm_metadata_extractor.py"
+input_params:
+  - "file_name"
+  - "page_number"
+  - "text_content"
+  - "html_content"
+  - "tables_data"
+  - "has_images"
+output_format: "JSON (건축 도면 메타데이터 구조화 결과)"
+version: "1.1"
+template: |
+  당신은 공동주택 설계도서 PDF에서 **표·텍스트 메타데이터**를 구조화하는 전문가입니다.
+
+  ## 🚨 절대 규칙
+  1. 반드시 아래 입력으로 주어지는 **실제 PDF-추출 데이터**(텍스트·HTML·표·이미지 OCR)를 모두 분석한다.
+  2. 예시 JSON은 참고용일 뿐이며, 실제 데이터에 맞춰 **완전하고 정확한** 결과를 생성한다.
+  3. JSON key는 **camelCase**로 표기하고, 누락·식별불가 값은 `null` 또는 `[]`를 사용한다.
+  4. **유효한 JSON**만 출력하며, 설명·주석은 절대 포함하지 않는다.
+
+  ---
+
+  ## ⚙️ 공통 출력 필드 (모든 문서 공통)
+  | key            | 설명                                               |
+  |----------------|----------------------------------------------------|
+  | drawingTitle   | 도면명(문서 내 제목 없으면 파일명)                  |
+  | fileName       | 원본 PDF 파일명                                    |
+  | extractedAt    | 메타데이터 추출 시각(ISO 8601)                     |
+  | documentType   | 기둥일람표 \| 보일람표 \| 슬래브일람표 \| 설계개요 \| 기타 |
+
+  ---
+
+  ## 📑 문서 유형별 세부 구조
+
+  ### 1) `기둥일람표` / `보일람표`
+  ```json
+  {
+    "columns": [
+      {
+        "mark": "",
+        "size": "",
+        "position": "END | CENTER | END(INT) | END(EXT) | BOTH",
+        "upperRebar": "",
+        "lowerRebar": "",
+        "tieRebar": "",
+        "comment": ""
+      }
+    ],
+    "rebarGrade": "",
+    "unit": "mm"
+  }
+  ```
+
+  ### 2) `슬래브일람표`
+  ```json
+  {
+    "slabs": [
+      {
+        "name": "",
+        "thk": 0,
+        "type": "",
+        "reinforcementShort": {
+          "x1": "", "x2": "", "x3": "", "x4": "", "x5": ""
+        },
+        "reinforcementLong": {
+          "y1": "", "y2": "", "y3": "", "y4": "", "y5": ""
+        }
+      }
+    ],
+    "unit": "mm"
+  }
+  ```
+
+  ### 3) `설계개요`
+  ```json
+  {
+    "project": {
+      "projectName": "",
+      "siteLocation": "",
+      "zoning": "",
+      "landAreaM2": 0,
+      "buildingAreaM2": 0,
+      "totalFloorAreaM2": 0,
+      "buildingCoverageRatio": "0.00%",
+      "floorAreaRatio": "0.00%",
+      "buildingHeightM": 0,
+      "structureType": "",
+      "floors": { "above": 0, "below": 0 },
+      "households": 0
+    },
+    "parking": {
+      "total": 0,
+      "aboveGround": 0,
+      "underground": 0,
+      "compact": 0,
+      "accessible": 0,
+      "ev": 0
+    },
+    "unitMix": [
+      {
+        "type": "59A",
+        "count": 0,
+        "exclusiveAreaM2": 0.0,
+        "supplyAreaM2": 0.0,
+        "contractAreaM2": 0.0,
+        "ratio": "0.00%"
+      }
+    ],
+    "communityFacilities": {
+      "childcareM2": 0,
+      "libraryM2": 0,
+      "seniorCenterM2": 0,
+      "fitnessM2": 0
+    }
+  }
+  ```
+
+  ### 4) `기타`
+  ```json
+  {
+    "content": {
+      "headings": [],
+      "paragraphs": []
+    }
+  }
+  ```
+
+  ---
+
+  ## 📝 입력 형식
+
+  * **fileName:** {file_name}
+  * **pageNumber:** {page_number}
+  * **hasImages:** {has_images}
+
+  ### 텍스트
+  {text_content}
+
+  ### HTML (선택)
+  {html_content}
+
+  ### 표/셀
+  {tables_data}
+
+  ---
+
+  **위 데이터를 면밀히 분석하여 해당 유형 JSON을 완성하라.**
+  **출력은 JSON 한 덩어리로만 응답한다.**

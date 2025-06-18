@@ -60,9 +60,103 @@ python src/vllm_config.py
 # - configs/vllm_memory.json (메모리 최적화)
 ```
 
-### 3. 기본 사용법
+### 3. LangSmith 추적 설정 (선택사항)
 
-#### vLLM 분석기 사용
+```bash
+# 1. LangSmith API 키 발급
+# https://smith.langchain.com/settings 에서 API 키 생성
+
+# 2. .env 파일 설정
+cp .env.example .env
+# .env 파일에서 다음 설정:
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your_api_key_here
+LANGSMITH_PROJECT=VLM-Architecture-Analysis
+
+# 3. LangSmith 통합 테스트
+python test_langsmith_integration.py
+
+# 4. 추적 결과 확인
+# https://smith.langchain.com/projects/p/VLM-Architecture-Analysis
+```
+
+#### LangSmith 추적 혜택
+- 🔍 **실시간 모니터링**: 모든 LLM 호출과 워크플로우 단계 추적
+- 📊 **성능 분석**: 응답 시간, 토큰 사용량, 비용 분석
+- 🐛 **디버깅 지원**: 오류 발생 시 상세한 컨텍스트 제공
+- 📈 **개선 지표**: 모델 성능과 정확도 추이 모니터링
+
+### 4. vLLM-LangChain OpenAI API 연동
+
+이 프로젝트는 vLLM 서버를 OpenAI API 형태로 실행하여 LangChain과 연동합니다.
+
+#### vLLM 서버 시작
+```bash
+# 1. vLLM 서버 시작 (별도 터미널에서 실행)
+# Option A: Gemma-3 12B GGUF (권장 - 메모리 효율적)
+./start_vllm_gemma.sh
+
+# Option B: 수동으로 Gemma 시작
+python -m vllm.entrypoints.openai.api_server \
+    --model google/gemma-3-12b-it-qat-q4_0-gguf \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --gpu-memory-utilization 0.6 \
+    --max-model-len 8192
+
+# Option C: 다른 모델 (더 큰 GPU 메모리 필요)
+python -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen3-Reranker-4B \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --gpu-memory-utilization 0.8 \
+    --max-model-len 8192
+
+# 2. 서버 상태 확인
+curl http://localhost:8000/v1/models
+```
+
+#### 지원되는 모델
+- **google/gemma-3-12b-it-qat-q4_0-gguf** (권장): 4-bit 양자화, 8GB GPU에 최적화
+- **hyokwan/llama31_common**: Llama 3.1 기반 모델
+- **Qwen/Qwen3-Reranker-4B**: 리랭킹 전용 모델 (더 큰 메모리 필요)
+
+#### LangChain 연동 사용
+```python
+from src.llm_metadata_extractor import LLMMetadataExtractor
+from src.llm_relationship_inferencer import LLMDrawingRelationshipInferencer
+
+# 메타데이터 추출기 (자동으로 vLLM 서버 연결)
+extractor = LLMMetadataExtractor()
+
+# 건축 도면 텍스트에서 메타데이터 추출
+sample_text = """
+도면번호: A01-001
+도면명: 1층 평면도
+축척: 1/100
+거실: 20.5㎡
+주방: 12.3㎡
+"""
+
+metadata = extractor.extract_metadata_from_text(
+    sample_text, 
+    "building_plan.pdf", 
+    1
+)
+
+print(f"도면번호: {metadata['drawing_number']}")
+print(f"도면제목: {metadata['drawing_title']}")
+```
+
+#### 연동 테스트
+```bash
+# vLLM-LangChain 연동 테스트
+python test_vllm_langchain_integration.py
+```
+
+### 5. 기본 사용법
+
+#### vLLM 분석기 사용 (Legacy)
 ```python
 from src.vllm_analyzer import VLLMAnalyzer
 
@@ -107,7 +201,7 @@ async def batch_analysis():
 results = asyncio.run(batch_analysis())
 ```
 
-### 4. 테스트 및 벤치마크
+### 6. 테스트 및 벤치마크
 
 ```bash
 # 통합 테스트 실행

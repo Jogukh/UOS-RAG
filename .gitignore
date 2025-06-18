@@ -22,7 +22,6 @@ Thumbs.db
 
 # Sensitive information
 *.env
-.env.*
 config.json
 secrets.json
 *.key
@@ -132,11 +131,6 @@ test_*.json
 # Streamlit specific
 .streamlit/secrets.toml
 .streamlit/config.toml
-
-# MCP specific
-mcp_*_results*
-mcp_cache/
-**/mcp_cache/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/

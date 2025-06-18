@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 LangGraph 기반 건축 도면 분석 워크플로우
-Sequ    def __init__(self, llm_model: str = "Qwen/Qwen3-Reranker-4B"):ntial Thinking, Context7, Tavily 등 MCP 도구들을 활용한 체인 구성
+.env 파일 기반 설정 사용
 """
 
 import json
@@ -9,6 +9,20 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, TypedDict, Annotated
+import sys
+
+# .env 설정 로드
+sys.path.append(str(Path(__file__).parent / "src"))
+try:
+    from src.env_config import EnvironmentConfig
+    from src.langsmith_integration import setup_langsmith_for_project, trace_workflow_step, LangSmithTracker
+    env_config = EnvironmentConfig()
+    print(f"📋 .env 기반 설정 로드됨 - 모델: {env_config.model_config.model_name}")
+    HAS_ENV_CONFIG = True
+except ImportError:
+    print("⚠️  env_config를 불러올 수 없습니다. 기본 설정을 사용합니다.")
+    env_config = None
+    HAS_ENV_CONFIG = False
 
 try:
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -57,18 +71,29 @@ class ArchitecturalWorkflowState(TypedDict):
 class ArchitecturalAnalysisWorkflow:
     """LangGraph 기반 건축 도면 분석 워크플로우"""
     
-    def __init__(self, llm_model: str = "Qwen/Qwen2.5-3B-Instruct"):
+    def __init__(self, llm_model: str = None):
         """
         Args:
-            llm_model: 사용할 LLM 모델 (vLLM 기반, GPU 사용)
+            llm_model: 사용할 LLM 모델 (None이면 .env에서 로드)
         """
-        self.llm_model = llm_model
+        # .env 설정에서 모델명 가져오기
+        if llm_model is None and HAS_ENV_CONFIG:
+            self.llm_model = env_config.model_config.model_name
+        elif llm_model is None:
+            self.llm_model = "Qwen/Qwen2.5-3B-Instruct"  # 기본값
+        else:
+            self.llm_model = llm_model
+            
+        self.env_config = env_config
         self.llm = None
         self.sampling_params = None
         self.workflow = None
         self.app = None
         
         if HAS_LANGGRAPH:
+            # LangSmith 설정
+            if HAS_ENV_CONFIG:
+                setup_langsmith_for_project()
             self._initialize_llm()
             self._build_workflow()
             
@@ -590,3 +615,31 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
+def simple_analysis_test(query: str, session_id: str = "test-session"):
+    """간단한 분석 테스트 함수 (LangSmith 추적 포함)"""
+    
+    @trace_workflow_step("simple_analysis")
+    def analyze_query(query_text: str):
+        """간단한 쿼리 분석"""
+        return {
+            "query": query_text,
+            "analysis": f"분석된 쿼리: {query_text}",
+            "timestamp": datetime.now().isoformat(),
+            "traced": True
+        }
+    
+    try:
+        # LangSmith 설정
+        if HAS_ENV_CONFIG:
+            setup_langsmith_for_project()
+            
+        # 분석 실행
+        result = analyze_query(query)
+        
+        print(f"✅ 분석 완료: {result['analysis']}")
+        return result
+        
+    except Exception as e:
+        print(f"❌ 분석 중 오류: {e}")
+        return {"error": str(e)}

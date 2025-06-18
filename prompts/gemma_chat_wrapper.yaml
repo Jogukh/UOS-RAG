@@ -1,0 +1,20 @@
+# Gemma 모델 채팅 래퍼 프롬프트
+name: "Gemma 모델 채팅 래퍼 프롬프트"
+type: "system_prompt"
+description: "Gemma 모델의 채팅 형식에 맞춘 래퍼 프롬프트"
+used_by:
+  - "query_rag.py"
+input_params:
+  - "system_message"
+  - "user_message"
+output_format: "채팅 형식 텍스트"
+version: "1.0"
+
+template: |
+  <|im_start|>system
+  {system_message}<|im_end|>
+
+  <|im_start|>user
+  {user_message}<|im_end|>
+
+  <|im_start|>assistant

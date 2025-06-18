@@ -1,0 +1,39 @@
+# VLM 프롬프트 설정 파일
+# 이 파일은 모든 프롬프트의 기본 설정과 메타데이터를 정의합니다.
+
+# 프롬프트 디렉토리 설정
+prompts_directory: "./prompts"
+default_encoding: "utf-8"
+
+# 프롬프트 파일 매핑
+# 각 프롬프트 ID에 대응하는 YAML 파일 경로
+prompt_files:
+  metadata_extraction: "metadata_extraction.yaml"
+  relationship_inference: "relationship_inference.yaml"
+  text_analysis: "text_analysis.yaml"
+  rag_query: "rag_query.yaml"
+  system_test: "system_test.yaml"
+  gemma_chat_wrapper: "gemma_chat_wrapper.yaml"
+  pdf_metadata_extraction: "pdf_metadata_extraction.yaml"
+
+# 프롬프트 유형 정의
+prompt_types:
+  - metadata_extraction
+  - relationship_inference
+  - text_analysis
+  - rag_query
+  - system_prompt
+
+# 캐싱 설정
+cache_prompts: true
+reload_on_change: false  # 개발 모드에서는 true로 설정
+
+# 유효성 검사 설정
+validate_params: true
+strict_mode: false  # true면 누락된 파라미터가 있으면 오류 발생
+
+# 로깅 설정
+logging:
+  enabled: true
+  level: "INFO"
+  log_prompt_usage: false  # 보안상 민감한 정보가 포함될 수 있음

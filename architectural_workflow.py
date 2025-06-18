@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 LangGraph 기반 건축 도면 분석 워크플로우
-Sequential Thinking과 MCP 도구들을 활용한 체인 구성
+.env 파일 기반 설정 사용
+PDF 및 DWG/DXF 파일 통합 분석 지원
 """
 
 from typing import Dict, List, Any, Optional, TypedDict, Annotated
@@ -9,22 +10,40 @@ from datetime import datetime
 import json
 from pathlib import Path
 import operator
+import sys
+
+# .env 설정 로드
+sys.path.append(str(Path(__file__).parent / "src"))
+try:
+    from env_config import get_env_config
+    env_config = get_env_config()
+    print(f"📋 .env 기반 설정 로드됨 - 모델: {env_config.model_config.model_name}")
+    HAS_ENV_CONFIG = True
+except ImportError:
+    print("⚠️  env_config를 불러올 수 없습니다. 기본 설정을 사용합니다.")
+    env_config = None
+    HAS_ENV_CONFIG = False
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langgraph.graph import StateGraph, END
 
-# MCP 도구들은 별도 호출 (코드에는 구현하지 않음)
-# - Sequential Thinking MCP
-# - Context7 MCP  
-# - Tavily MCP
+# DWG 분석 모듈 import
+try:
+    from src.dwg_parser import DWGParser
+    from src.dwg_metadata_extractor import DWGMetadataExtractor
+    from src.langsmith_integration import trace_llm_call, LangSmithTracker
+    HAS_DWG_MODULES = True
+except ImportError:
+    print("⚠️  DWG 분석 모듈을 불러올 수 없습니다.")
+    HAS_DWG_MODULES = False
 
 class WorkflowState(TypedDict):
     """워크플로우 상태 정의"""
     # 입력 데이터
     project_path: str
-    analysis_type: str  # "full", "metadata_only", "relationships_only", "rag_only"
+    analysis_type: str  # "full", "metadata_only", "relationships_only", "rag_only", "dwg_only", "pdf_only"
     
     # 처리 단계별 상태
     step: str
@@ -33,6 +52,7 @@ class WorkflowState(TypedDict):
     
     # 데이터 상태
     pdf_texts: Dict[str, Any]
+    dwg_data: Dict[str, Any]  # DWG 분석 데이터 추가
     metadata: Dict[str, Any]
     relationships: Dict[str, Any]
     rag_db_status: bool
@@ -60,6 +80,7 @@ class ArchitecturalAnalysisWorkflow:
         self.workflow.add_node("initialize", self.initialize_analysis)
         self.workflow.add_node("analyze_requirements", self.analyze_requirements)
         self.workflow.add_node("extract_pdf_text", self.extract_pdf_text)
+        self.workflow.add_node("extract_dwg_data", self.extract_dwg_data)  # DWG 분석 노드 추가
         self.workflow.add_node("extract_metadata", self.extract_metadata)
         self.workflow.add_node("infer_relationships", self.infer_relationships)
         self.workflow.add_node("build_rag_db", self.build_rag_db)
@@ -75,6 +96,7 @@ class ArchitecturalAnalysisWorkflow:
             self.route_next_step,
             {
                 "extract_text": "extract_pdf_text",
+                "extract_dwg": "extract_dwg_data",  # DWG 분석 경로 추가
                 "metadata_only": "extract_metadata",
                 "relationships_only": "infer_relationships",
                 "rag_only": "build_rag_db"
@@ -82,6 +104,7 @@ class ArchitecturalAnalysisWorkflow:
         )
         
         self.workflow.add_edge("extract_pdf_text", "extract_metadata")
+        self.workflow.add_edge("extract_dwg_data", "extract_metadata")  # DWG → 메타데이터 경로
         self.workflow.add_edge("extract_metadata", "infer_relationships")
         self.workflow.add_edge("infer_relationships", "build_rag_db")
         self.workflow.add_edge("build_rag_db", "validate_results")
@@ -116,9 +139,6 @@ class ArchitecturalAnalysisWorkflow:
         """요구사항 분석 (Sequential Thinking 활용)"""
         state["step"] = "analyze_requirements"
         state["current_task"] = "요구사항 분석 및 실행 계획 수립"
-        
-        # 여기서 Sequential Thinking MCP 도구를 호출하여 분석 계획 수립
-        # (실제 MCP 호출은 외부에서 수행)
         
         # 분석 유형에 따른 사고 과정 시뮬레이션
         analysis_type = state["analysis_type"]
@@ -169,27 +189,49 @@ class ArchitecturalAnalysisWorkflow:
         return state
     
     def extract_metadata(self, state: WorkflowState) -> WorkflowState:
-        """메타데이터 추출"""
+        """메타데이터 추출 - PDF와 DWG 데이터 통합"""
         state["step"] = "extract_metadata"
-        state["current_task"] = "도면 메타데이터 추출"
+        state["current_task"] = "통합 메타데이터 추출"
         
         try:
-            # 실제 메타데이터 추출 로직 (extract_metadata.py 호출)
-            import subprocess
-            result = subprocess.run(
-                ["python", "extract_metadata.py"],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode == 0:
-                state["metadata"] = {"status": "success", "message": "메타데이터 추출 완료"}
-                state["logs"].append(f"[{datetime.now()}] 메타데이터 추출 성공")
-            else:
-                state["errors"].append(f"메타데이터 추출 실패: {result.stderr}")
+            # PDF 메타데이터 추출
+            if state.get("pdf_texts", {}).get("status") == "success":
+                # 실제 PDF 메타데이터 추출 로직 (extract_metadata.py 호출)
+                import subprocess
+                result = subprocess.run(
+                    ["python", "extract_metadata.py"],
+                    capture_output=True,
+                    text=True
+                )
                 
+                if result.returncode == 0:
+                    state["logs"].append(f"[{datetime.now()}] PDF 메타데이터 추출 성공")
+                else:
+                    state["errors"].append(f"PDF 메타데이터 추출 실패: {result.stderr}")
+            
+            # DWG 메타데이터는 이미 extract_dwg_data에서 처리됨
+            dwg_data = state.get("dwg_data", {})
+            if dwg_data.get("status") == "success":
+                # DWG 메타데이터를 통합 메타데이터에 병합
+                extracted_dwg_data = dwg_data.get("data", {})
+                
+                integrated_metadata = {
+                    "pdf_metadata": state.get("metadata", {}),
+                    "dwg_metadata": extracted_dwg_data,
+                    "integration_timestamp": datetime.now().isoformat(),
+                    "total_dwg_files": dwg_data.get("files_processed", 0)
+                }
+                
+                state["metadata"] = integrated_metadata
+                state["logs"].append(f"[{datetime.now()}] DWG 메타데이터 통합 완료")
+            
+            # 통합 메타데이터 상태 설정
+            if not state.get("metadata"):
+                state["metadata"] = {"status": "no_data", "message": "추출할 메타데이터가 없습니다"}
+            
         except Exception as e:
             state["errors"].append(f"메타데이터 추출 중 오류: {str(e)}")
+            state["metadata"] = {"status": "error", "error": str(e)}
         
         state["progress"] = 60.0
         return state
@@ -221,32 +263,86 @@ class ArchitecturalAnalysisWorkflow:
         return state
     
     def build_rag_db(self, state: WorkflowState) -> WorkflowState:
-        """RAG 데이터베이스 구축"""
+        """RAG 데이터베이스 구축 - PDF와 DWG 데이터 통합"""
         state["step"] = "build_rag_db"
-        state["current_task"] = "RAG 데이터베이스 구축"
+        state["current_task"] = "통합 RAG 데이터베이스 구축"
         
         try:
-            # 실제 RAG DB 구축 로직 (build_rag_db.py 호출)
-            import subprocess
-            result = subprocess.run(
-                ["python", "build_rag_db.py"],
-                capture_output=True,
-                text=True
+            # PDF RAG 데이터 구축
+            if state.get("pdf_texts", {}).get("status") == "success":
+                import subprocess
+                result = subprocess.run(
+                    ["python", "build_rag_db.py"],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    state["logs"].append(f"[{datetime.now()}] PDF RAG 데이터베이스 구축 성공")
+                else:
+                    state["errors"].append(f"PDF RAG 구축 실패: {result.stderr}")
+            
+            # DWG RAG 데이터 구축
+            dwg_data = state.get("dwg_data", {})
+            if dwg_data.get("status") == "success":
+                # DWG RAG 콘텐츠를 RAG 데이터베이스에 추가
+                extracted_dwg_data = dwg_data.get("data", {})
+                
+                rag_contents = []
+                for file_path, metadata in extracted_dwg_data.items():
+                    rag_content = metadata.get("rag_content", "")
+                    if rag_content:
+                        rag_contents.append({
+                            "source": file_path,
+                            "content": rag_content,
+                            "metadata": metadata,
+                            "type": "dwg_analysis"
+                        })
+                
+                if rag_contents:
+                    # RAG 데이터베이스에 DWG 콘텐츠 추가
+                    self._add_dwg_to_rag_db(rag_contents, state)
+                    state["logs"].append(f"[{datetime.now()}] DWG RAG 콘텐츠 {len(rag_contents)}개 추가")
+            
+            state["rag_db_status"] = True
+            state["logs"].append(f"[{datetime.now()}] 통합 RAG 데이터베이스 구축 완료")
+            
+        except Exception as e:
+            state["errors"].append(f"RAG 데이터베이스 구축 중 오류: {str(e)}")
+            state["rag_db_status"] = False
+        
+        state["progress"] = 85.0
+        return state
+    
+    @trace_llm_call("workflow_add_dwg_to_rag", "chain")
+    def _add_dwg_to_rag_db(self, rag_contents: List[Dict[str, Any]], state: WorkflowState):
+        """DWG 콘텐츠를 RAG 데이터베이스에 추가"""
+        try:
+            # ChromaDB에 DWG 데이터 추가하는 로직
+            import chromadb
+            from chromadb.config import Settings
+            
+            client = chromadb.PersistentClient(path="./chroma_db")
+            collection = client.get_or_create_collection(
+                name="architectural_drawings",
+                metadata={"description": "통합 건축 도면 분석 데이터"}
             )
             
-            if result.returncode == 0:
-                state["rag_db_status"] = True
-                state["logs"].append(f"[{datetime.now()}] RAG DB 구축 성공")
-            else:
-                state["rag_db_status"] = False
-                state["errors"].append(f"RAG DB 구축 실패: {result.stderr}")
+            for i, content in enumerate(rag_contents):
+                collection.add(
+                    documents=[content["content"]],
+                    metadatas=[{
+                        "source": content["source"],
+                        "type": content["type"],
+                        "timestamp": datetime.now().isoformat()
+                    }],
+                    ids=[f"dwg_{i}_{datetime.now().timestamp()}"]
+                )
                 
+            state["logs"].append(f"[{datetime.now()}] ChromaDB에 DWG 데이터 추가 완료")
+            
         except Exception as e:
-            state["rag_db_status"] = False
-            state["errors"].append(f"RAG DB 구축 중 오류: {str(e)}")
-        
-        state["progress"] = 90.0
-        return state
+            state["errors"].append(f"DWG RAG 데이터 추가 실패: {str(e)}")
     
     def validate_results(self, state: WorkflowState) -> WorkflowState:
         """결과 검증"""
@@ -295,10 +391,28 @@ class ArchitecturalAnalysisWorkflow:
         return state
     
     def route_next_step(self, state: WorkflowState) -> str:
-        """다음 단계 라우팅"""
+        """다음 단계 라우팅 - DWG 분석 경로 추가"""
         analysis_type = state["analysis_type"]
+        project_path = Path(state["project_path"])
+        
+        # 파일 유형별 존재 확인
+        has_pdf = any(project_path.rglob("*.pdf"))
+        has_dwg = any(project_path.rglob("*.dwg")) or any(project_path.rglob("*.dxf"))
         
         if analysis_type == "full":
+            # 전체 분석 - PDF와 DWG 모두 처리
+            if has_pdf and has_dwg:
+                return "extract_text"  # PDF 먼저 처리
+            elif has_pdf:
+                return "extract_text"
+            elif has_dwg:
+                return "extract_dwg"
+            else:
+                return "metadata_only"
+                
+        elif analysis_type == "dwg_only":
+            return "extract_dwg"
+        elif analysis_type == "pdf_only":
             return "extract_text"
         elif analysis_type == "metadata_only":
             return "metadata_only"
@@ -307,7 +421,13 @@ class ArchitecturalAnalysisWorkflow:
         elif analysis_type == "rag_only":
             return "rag_only"
         else:
-            return "extract_text"  # 기본값
+            # 기본값: 파일 유형에 따라 자동 결정
+            if has_dwg:
+                return "extract_dwg"
+            elif has_pdf:
+                return "extract_text"
+            else:
+                return "metadata_only"
     
     def _get_next_steps(self, analysis_type: str) -> List[str]:
         """분석 유형별 다음 단계 목록"""
@@ -315,7 +435,9 @@ class ArchitecturalAnalysisWorkflow:
             "full": ["extract_pdf_text", "extract_metadata", "infer_relationships", "build_rag_db"],
             "metadata_only": ["extract_metadata"],
             "relationships_only": ["infer_relationships"],
-            "rag_only": ["build_rag_db"]
+            "rag_only": ["build_rag_db"],
+            "dwg_only": ["extract_dwg_data"],
+            "pdf_only": ["extract_pdf_text"]
         }
         return steps_map.get(analysis_type, steps_map["full"])
     
@@ -369,34 +491,6 @@ class ArchitecturalAnalysisWorkflow:
             for error in state["errors"]:
                 report += f"- ❌ {error}\n"
         
-        # MCP 도구 활용 참고사항
-        report += """
-## MCP 도구 활용 참고사항
-
-이 워크플로우는 다음 MCP 도구들과 연계하여 실행됩니다:
-
-### Sequential Thinking MCP
-- 복잡한 분석 과정을 체계적으로 사고
-- 단계별 의사결정 지원
-- 분석 품질 향상
-
-### Context7 MCP  
-- LangChain, LangGraph 최신 문서 참조
-- 건축 도메인 지식 활용
-- 기술적 구현 가이드
-
-### Tavily MCP
-- 실시간 웹 검색으로 최신 정보 수집
-- 건축 기준 및 규정 확인
-- 기술 동향 파악
-
-### 활용 방법
-1. Sequential Thinking으로 분석 계획 수립
-2. Context7으로 기술 문서 조회
-3. Tavily로 최신 정보 보완
-4. LangGraph 워크플로우 실행
-"""
-        
         return report
     
     def run_workflow(self, project_path: str, analysis_type: str = "full") -> Dict[str, Any]:
@@ -409,6 +503,7 @@ class ArchitecturalAnalysisWorkflow:
             current_task="",
             progress=0.0,
             pdf_texts={},
+            dwg_data={},
             metadata={},
             relationships={},
             rag_db_status=False,
@@ -424,13 +519,98 @@ class ArchitecturalAnalysisWorkflow:
         
         return final_state
 
+    @trace_llm_call("workflow_extract_dwg_data", "chain")
+    def extract_dwg_data(self, state: WorkflowState) -> WorkflowState:
+        """DWG/DXF 파일 데이터 추출"""
+        state["step"] = "extract_dwg_data"
+        state["current_task"] = "DWG/DXF 파일 분석 및 메타데이터 추출"
+        
+        if not HAS_DWG_MODULES:
+            state["errors"].append("DWG 분석 모듈이 설치되지 않았습니다.")
+            state["progress"] = 40.0
+            return state
+        
+        try:
+            project_path = Path(state["project_path"])
+            dwg_files = []
+            
+            # DWG/DXF 파일 찾기 (XREF 폴더 제외)
+            for ext in ['*.dwg', '*.dxf']:
+                found_files = project_path.rglob(ext)
+                for dwg_file in found_files:
+                    # XREF 폴더 제외 - 경로에 XREF가 포함된 경우 건너뛰기
+                    if 'XREF' not in str(dwg_file).upper():
+                        dwg_files.append(dwg_file)
+            
+            if not dwg_files:
+                state["logs"].append(f"[{datetime.now()}] DWG/DXF 파일을 찾을 수 없습니다 (XREF 폴더 제외).")
+                state["dwg_data"] = {"status": "no_files", "files": []}
+                state["progress"] = 40.0
+                return state
+            
+            # DWG 메타데이터 추출기 초기화
+            dwg_extractor = DWGMetadataExtractor()
+            
+            extracted_data = {}
+            
+            for dwg_file in dwg_files:
+                state["logs"].append(f"[{datetime.now()}] DWG 파일 분석 시작: {dwg_file.name}")
+                
+                try:
+                    # DWG 메타데이터 추출 (프로젝트 경로도 전달)
+                    metadata = dwg_extractor.extract_from_dwg_file(
+                        str(dwg_file), 
+                        str(project_path)  # project_base_path 전달
+                    )
+                    
+                    if metadata:
+                        extracted_data[str(dwg_file)] = metadata
+                        
+                        # 메타데이터 JSON 파일 저장 (RAG 콘텐츠 대신)
+                        output_dir = dwg_file.parent / "metadata"
+                        output_dir.mkdir(exist_ok=True)
+                        
+                        output_path = output_dir / f"{dwg_file.stem}_metadata.json"
+                        with open(output_path, 'w', encoding='utf-8') as f:
+                            json.dump(metadata, f, ensure_ascii=False, indent=2, default=str)
+                        
+                        state["logs"].append(f"[{datetime.now()}] DWG 분석 완료: {dwg_file.name}")
+                    else:
+                        state["errors"].append(f"DWG 메타데이터 추출 실패: {dwg_file.name}")
+                        
+                except Exception as e:
+                    state["errors"].append(f"DWG 파일 처리 중 오류 ({dwg_file.name}): {str(e)}")
+            
+            state["dwg_data"] = {
+                "status": "success",
+                "files_processed": len(extracted_data),
+                "total_files": len(dwg_files),
+                "data": extracted_data
+            }
+            
+            # 사고 과정 기록
+            state["thoughts"].append({
+                "thought": f"DWG 파일 {len(dwg_files)}개 중 {len(extracted_data)}개 처리 완료",
+                "analysis": "DWG 파일에서 구조적 데이터와 메타데이터를 성공적으로 추출",
+                "next_action": "추출된 데이터를 통합 메타데이터 시스템에 연동"
+            })
+            
+            state["logs"].append(f"[{datetime.now()}] DWG 데이터 추출 완료: {len(extracted_data)}/{len(dwg_files)} 파일")
+            
+        except Exception as e:
+            state["errors"].append(f"DWG 데이터 추출 중 오류: {str(e)}")
+            state["dwg_data"] = {"status": "error", "error": str(e)}
+        
+        state["progress"] = 40.0
+        return state
+
 def main():
     """메인 실행 함수"""
     import argparse
     
     parser = argparse.ArgumentParser(description="LangGraph 기반 건축 도면 분석 워크플로우")
     parser.add_argument("project_path", help="분석할 프로젝트 경로")
-    parser.add_argument("--analysis-type", choices=["full", "metadata_only", "relationships_only", "rag_only"], 
+    parser.add_argument("--analysis-type", choices=["full", "metadata_only", "relationships_only", "rag_only", "dwg_only", "pdf_only"], 
                        default="full", help="분석 유형")
     
     args = parser.parse_args()

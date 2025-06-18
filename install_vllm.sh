@@ -59,15 +59,15 @@ check_python() {
 setup_venv() {
     echo "📦 Setting up virtual environment..."
     
-    if [[ ! -d "venv" ]]; then
-        python3 -m venv venv
+    if [[ ! -d ".venv" ]]; then
+        python3 -m venv .venv
         echo "✅ Virtual environment created"
     else
         echo "✅ Virtual environment already exists"
     fi
     
     # Activate virtual environment
-    source venv/bin/activate
+    source .venv/bin/activate
     echo "✅ Virtual environment activated"
     
     # Upgrade pip
@@ -186,8 +186,10 @@ main() {
     echo "================================================"
     
     # Detect system
+    set +e  # Temporarily disable exit on error for detect_system
     detect_system
     local system_type=$?
+    set -e  # Re-enable exit on error
     
     # Check Python
     if ! check_python; then
@@ -230,7 +232,7 @@ main() {
     echo "🎉 VLM Environment setup completed!"
     echo ""
     echo "💡 Usage Instructions:"
-    echo "   1. Activate virtual environment: source venv/bin/activate"
+    echo "   1. Activate virtual environment: source .venv/bin/activate"
     echo "   2. Run tests: python simple_test.py"
     echo "   3. For Apple Silicon: MPS acceleration will be used automatically"
     echo "   4. For Linux/Intel: CUDA will be used if available"

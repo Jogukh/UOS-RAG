@@ -2,10 +2,13 @@
 # torch>=2.4.0  # 스크립트에서 환경별 설치
 # torchvision>=0.19.0  # 스크립트에서 환경별 설치
 # git+https://github.com/huggingface/transformers.git  # 스크립트에서 별도 설치
+transformers>=4.43.0
 accelerate>=0.25.0
 optimum>=1.14.0
 # auto-gptq>=0.7.0  # Apple Silicon에서 문제 가능성, 필요시 수동 설치
-sentence-transformers>=2.2.2
+sentence-transformers>=3.1.0
+einops>=0.7.0
+# numpy<2.0  # jinaai/jina-embeddings-v3에서 요구
 
 # VLM & Image Processing  
 Pillow>=10.0.0
@@ -29,6 +32,7 @@ packaging>=21.0
 # RAG & Vector DB
 langchain>=0.3.0
 langgraph>=0.2.0
+langsmith>=0.2.0  # LangSmith tracing and observability
 chromadb>=0.4.0
 pgvector>=0.2.0
 psycopg2-binary>=2.9.7  # Better compatibility on Linux
@@ -39,6 +43,11 @@ tavily-python>=0.3.0
 # PDF Processing
 PyMuPDF>=1.23.0  # fitz is included in PyMuPDF
 pdf2image>=1.16.0
+unstructured[pdf]>=0.15.0  # UnstructuredPDFLoader 지원
+unstructured-client>=0.25.0  # Unstructured API 클라이언트 (선택사항)
+
+# CAD/DWG Processing
+ezdxf>=1.3.0  # DXF/DWG 파일 읽기 및 분석
 
 # API & Web
 fastapi>=0.104.0

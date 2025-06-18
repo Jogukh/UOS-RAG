@@ -1,0 +1,32 @@
+# 도면 텍스트 참조 분석 프롬프트
+name: "도면 텍스트 참조 분석 프롬프트"
+type: "text_analysis"
+description: "도면 텍스트에서 다른 도면을 참조하는 부분을 찾아 분석"
+used_by:
+  - "llm_relationship_inferencer.py"
+input_params:
+  - "drawing_text"
+  - "other_drawings_info"
+output_format: "구조화된 텍스트 (참조도면, 참조내용)"
+version: "1.0"
+
+template: |
+  <|im_start|>system
+  당신은 건축 도면 텍스트 분석 전문가입니다. 주어진 도면의 텍스트 내용에서 다른 도면을 참조하는 부분을 찾아주세요.
+
+  답변 형식:
+  참조도면: [참조되는 도면번호들을 쉼표로 구분]
+  참조내용: [참조 내용 요약]
+
+  참조가 없으면 "참조도면: 없음"으로 답변하세요.<|im_end|>
+
+  <|im_start|>user
+  분석할 도면의 텍스트 내용:
+  {drawing_text}
+
+  프로젝트 내 다른 도면들:
+  {other_drawings_info}
+
+  이 텍스트에서 다른 도면을 참조하는 부분을 찾아주세요.<|im_end|>
+
+  <|im_start|>assistant
