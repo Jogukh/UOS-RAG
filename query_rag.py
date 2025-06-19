@@ -17,6 +17,33 @@ except ImportError:
     env_config = None
     HAS_ENV_CONFIG = False
 
+# LangSmith 추적 기능 추가
+try:
+    from langsmith_integration import (
+        langsmith_tracker, 
+        trace_llm_call, 
+        trace_workflow_step, 
+        trace_tool_call
+    )
+    HAS_LANGSMITH = True
+    print("📊 LangSmith 추적 기능 로드됨")
+except ImportError:
+    print("⚠️  LangSmith 통합 모듈을 불러올 수 없습니다.")
+    HAS_LANGSMITH = False
+    # Mock decorators
+    def trace_llm_call(name=None, run_type="llm"):
+        def decorator(func):
+            return func
+        return decorator
+    def trace_workflow_step(name=None, run_type="chain"):
+        def decorator(func):
+            return func
+        return decorator
+    def trace_tool_call(name=None):
+        def decorator(func):
+            return func
+        return decorator
+
 # Ollama API 사용
 try:
     import requests
@@ -26,15 +53,6 @@ except ImportError as e:
     print(f"requests를 import하는 데 실패했습니다: {e}")
     print("질의응답 시 LLM 답변 생성 기능이 제한될 수 있습니다.")
     HAS_OLLAMA = False
-
-# vLLM 기반 텍스트 LLM 사용 (백업용)
-try:
-    from vllm import LLM, SamplingParams
-    HAS_VLLM = True
-except ImportError as e:
-    print(f"vLLM을 import하는 데 실패했습니다: {e}")
-    print("vLLM 백업 기능이 제한될 수 있습니다.")
-    HAS_VLLM = False
 
 # 상수 정의 (.env에서 가져오거나 기본값 사용)
 CHROMA_DB_PATH = "./chroma_db"
@@ -72,6 +90,7 @@ def get_available_collections():
         print(f"컬렉션 목록 가져오기 실패: {e}")
         return []
 
+@trace_tool_call(name="vector_search")
 def query_rag_database(query_text, n_results=3, project_name=None):
     """
     사용자 질의를 바탕으로 프로젝트별 RAG 데이터베이스를 검색합니다.
@@ -171,6 +190,7 @@ def query_rag_database(query_text, n_results=3, project_name=None):
         print(f"DB 질의 중 오류 발생: {e}")
         return None
 
+@trace_tool_call(name="initialize_llm")
 def initialize_llm():
     """Ollama API 기반 텍스트 LLM을 초기화합니다."""
     if not HAS_OLLAMA:
@@ -210,6 +230,7 @@ def initialize_llm():
         print(f"❌ LLM 초기화 중 오류 발생: {e}")
         return None
 
+@trace_llm_call(name="ollama_generate_answer", run_type="llm")
 def generate_answer_with_llm(llm_components, query_text, retrieved_documents_text):
     """검색된 문서를 바탕으로 Ollama API를 사용하여 답변을 생성합니다."""
     if not llm_components:
@@ -304,9 +325,54 @@ def display_results(results, llm_analyzer=None, original_query=None):
         if results.get('ids') and results['ids'][0]:
             print(f"참고한 주요 문서 ID(들): {', '.join(results['ids'][0][:3])}")
 
+@trace_workflow_step(name="rag_query_workflow", run_type="chain")
+def execute_rag_workflow(query_text, n_results, project_name, use_llm=True):
+    """전체 RAG 워크플로우를 실행하고 추적합니다."""
+    workflow_metadata = {
+        "query": query_text,
+        "n_results": n_results,
+        "project": project_name,
+        "use_llm": use_llm
+    }
+    
+    # LangSmith 세션 시작
+    if HAS_LANGSMITH and langsmith_tracker.is_enabled():
+        session_id = langsmith_tracker.start_session("RAG_Query", workflow_metadata)
+        print(f"📊 LangSmith 추적 세션 시작: {session_id}")
+    
+    try:
+        # LLM 초기화
+        llm_analyzer_instance = None
+        if use_llm:
+            print("LLM 모델을 초기화하는 중...")
+            llm_analyzer_instance = initialize_llm()
+            if not llm_analyzer_instance:
+                print("경고: LLM 모델 초기화에 실패하여 LLM 답변 없이 검색만 수행합니다.")
+        
+        # RAG 검색 실행
+        search_results = query_rag_database(query_text, n_results, project_name)
+        
+        # 결과 표시 및 LLM 답변 생성
+        if search_results:
+            display_results(search_results, llm_analyzer_instance, query_text)
+        elif llm_analyzer_instance and use_llm:
+            print("\\n--- LLM 일반 답변 (검색 결과 없음) ---")
+            llm_answer = generate_answer_with_llm(llm_analyzer_instance, query_text, "관련 정보를 찾을 수 없었습니다.")
+            print(f"LLM 답변: {llm_answer}")
+        
+        return search_results
+        
+    except Exception as e:
+        print(f"❌ RAG 워크플로우 실행 중 오류: {e}")
+        return None
+    finally:
+        # LangSmith 세션 종료
+        if HAS_LANGSMITH and langsmith_tracker.is_enabled():
+            langsmith_tracker.end_session('session_id' if 'session_id' in locals() else 'default')
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="건축 도면 RAG DB 질의 시스템 (프로젝트별)")
-    parser.add_argument("query", type=str, help="검색할 질의 내용")
+    parser.add_argument("query", type=str, nargs='?', help="검색할 질의 내용")
     parser.add_argument("-n", "--n_results", type=int, default=3, help="반환할 검색 결과 수 (기본값: 3)")
     parser.add_argument("-p", "--project", type=str, default=None, help="검색할 프로젝트 이름 (선택 사항, 미지정 시 모든 프로젝트 검색)")
     parser.add_argument("--no_llm", action="store_true", help="LLM 답변 생성을 비활성화합니다.")
@@ -323,26 +389,27 @@ if __name__ == "__main__":
             print(f"  - {project_name}")
         exit(0)
 
-    llm_analyzer_instance = None
-    if not args.no_llm:
-        print("LLM 모델을 초기화하는 중...")
-        llm_analyzer_instance = initialize_llm()
-        if not llm_analyzer_instance:
-            print("경고: LLM 모델 초기화에 실패하여 LLM 답변 없이 검색만 수행합니다.")
-    else:
-        print("LLM 답변 생성이 비활성화되었습니다.")
+    # query가 제공되지 않았을 때 사용법 예시 표시
+    if not args.query:
+        print("❌ 질의 텍스트가 필요합니다!")
+        print("\n📋 사용법 예시:")
+        print("python query_rag.py \"부산장안지구 아파트 도면에서 화장실 배치도를 찾아줘\"")
+        print("python query_rag.py \"전기 배선도\" -p 부산장안지구 -n 5")
+        print("python query_rag.py \"건축 도면\" --no_llm")
+        print("python query_rag.py --list_projects")
+        print("\n더 자세한 도움말은 'python query_rag.py --help'를 참조하세요.")
+        exit(1)
 
     print(f"질의: \"{args.query}\"")
     if args.project:
         print(f"대상 프로젝트: {args.project}")
     else:
         print("모든 프로젝트에서 검색")
-        
-    search_results = query_rag_database(args.query, args.n_results, args.project)
-
-    if search_results:
-        display_results(search_results, llm_analyzer_instance, args.query)
-    elif llm_analyzer_instance and not args.no_llm:
-        print("\\n--- LLM 일반 답변 (검색 결과 없음) ---")
-        llm_answer = generate_answer_with_llm(llm_analyzer_instance, args.query, "관련 정보를 찾을 수 없었습니다.")
-        print(f"LLM 답변: {llm_answer}")
+    
+    # 새로운 추적 가능한 워크플로우 실행
+    execute_rag_workflow(
+        query_text=args.query,
+        n_results=args.n_results,
+        project_name=args.project,
+        use_llm=not args.no_llm
+    )

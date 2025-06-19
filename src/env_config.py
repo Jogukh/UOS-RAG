@@ -108,7 +108,7 @@ class EnvironmentConfig:
         
         # 모델 설정
         self.model_config = ModelConfig(
-            model_name=get_env_str('CUSTOM_MODEL_PATH', 'Qwen/Qwen3-Reranker-4B'),
+            model_name=get_env_str('CUSTOM_MODEL_PATH'),
             trust_remote_code=True,
             max_model_len=get_env_int('MAX_MODEL_LEN', 8192),
             quantization=get_env_str('MODEL_DTYPE', 'bfloat16'),
@@ -297,11 +297,6 @@ if __name__ == "__main__":
     config.setup_logging()
     config.create_directories()
     config.print_config()
-    
-    print(f"\n🎯 vLLM 설정:")
-    vllm_config = config.get_vllm_config()
-    for key, value in vllm_config.items():
-        print(f"   {key}: {value}")
     
     print(f"\n🎯 샘플링 파라미터:")
     sampling_params = config.get_sampling_params()

@@ -153,3 +153,5 @@ chroma_db/
 *.db
 *.sqlite
 *.sqlite3
+VLM.code-workspace
+VLM.code-workspace

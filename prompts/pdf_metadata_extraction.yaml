@@ -16,120 +16,101 @@ input_params:
 output_format: "JSON (건축 도면 메타데이터 구조화 결과)"
 version: "1.1"
 template: |
-  당신은 공동주택 설계도서 PDF에서 **표·텍스트 메타데이터**를 구조화하는 전문가입니다.
+  당신은 공동주택 설계도서 PDF에서 **Self-Query 호환 메타데이터**를 구조화하는 전문가입니다.
 
   ## 🚨 절대 규칙
   1. 반드시 아래 입력으로 주어지는 **실제 PDF-추출 데이터**(텍스트·HTML·표·이미지 OCR)를 모두 분석한다.
-  2. 예시 JSON은 참고용일 뿐이며, 실제 데이터에 맞춰 **완전하고 정확한** 결과를 생성한다.
-  3. JSON key는 **camelCase**로 표기하고, 누락·식별불가 값은 `null` 또는 `[]`를 사용한다.
+  2. **Self-Query Retriever 호환** JSON 구조로 출력하며, content와 metadata를 명확히 분리한다.
+  3. 메타데이터 필드는 검색 가능한 타입(string, integer, float, boolean)으로 구조화한다.
   4. **유효한 JSON**만 출력하며, 설명·주석은 절대 포함하지 않는다.
 
   ---
 
-  ## ⚙️ 공통 출력 필드 (모든 문서 공통)
-  | key            | 설명                                               |
-  |----------------|----------------------------------------------------|
-  | drawingTitle   | 도면명(문서 내 제목 없으면 파일명)                  |
-  | fileName       | 원본 PDF 파일명                                    |
-  | extractedAt    | 메타데이터 추출 시각(ISO 8601)                     |
-  | documentType   | 기둥일람표 \| 보일람표 \| 슬래브일람표 \| 설계개요 \| 기타 |
+  ## ⚙️ Self-Query 호환 출력 구조
+
+  ```json
+  {
+    "content": "문서의 주요 내용을 자연어로 요약 (검색 시 매칭될 텍스트)",
+    "metadata": {
+      "drawing_number": "도면번호",
+      "drawing_title": "도면제목/문서명",
+      "drawing_type": "기둥일람표|보일람표|슬래브일람표|설계개요|일람표|개요",
+      "document_type": "구체적 문서 유형",
+      "project_name": "프로젝트명",
+      "site_location": "부지 위치",
+      "file_name": "원본 파일명",
+      "page_number": "페이지 번호 (정수)",
+      "has_tables": "표 포함 여부 (true|false)",
+      "has_images": "이미지 포함 여부 (true|false)",
+      "land_area": "대지면적 (숫자, ㎡)",
+      "building_area": "건축면적 (숫자, ㎡)",
+      "total_floor_area": "연면적 (숫자, ㎡)",
+      "building_height": "건물 높이 (숫자, m)",
+      "floors_above": "지상층 수 (정수)",
+      "floors_below": "지하층 수 (정수)",
+      "total_households": "총 세대 수 (정수)",
+      "parking_total": "총 주차대수 (정수)",
+      "structure_type": "구조형식",
+      "zoning": "용도지역",
+      "completion_score": "정보 완성도 (0-100 정수)",
+      "extracted_at": "추출 시각 (ISO 8601)"
+    },
+    "detailed_data": {
+      "structural_elements": [
+        {
+          "type": "기둥|보|슬래브",
+          "mark": "부재 기호",
+          "size": "크기/치수",
+          "reinforcement": "철근 정보",
+          "specifications": "상세 사양"
+        }
+      ],
+      "unit_mix": [
+        {
+          "type": "세대형 (예: 59A)",
+          "count": "세대 수 (정수)",
+          "exclusive_area": "전용면적 (숫자)",
+          "supply_area": "공급면적 (숫자)",
+          "ratio": "비율"
+        }
+      ],
+      "facilities": [
+        {
+          "name": "시설명",
+          "area": "면적 (숫자)",
+          "type": "시설 유형"
+        }
+      ]
+    }
+  }
+  ```
 
   ---
 
-  ## 📑 문서 유형별 세부 구조
+  ## 📊 문서 유형별 메타데이터 추출 가이드
 
-  ### 1) `기둥일람표` / `보일람표`
-  ```json
-  {
-    "columns": [
-      {
-        "mark": "",
-        "size": "",
-        "position": "END | CENTER | END(INT) | END(EXT) | BOTH",
-        "upperRebar": "",
-        "lowerRebar": "",
-        "tieRebar": "",
-        "comment": ""
-      }
-    ],
-    "rebarGrade": "",
-    "unit": "mm"
-  }
-  ```
+  ### 1) **기둥일람표/보일람표**
+  - `drawing_type`: "일람표"
+  - `document_type`: "기둥일람표" 또는 "보일람표"
+  - `completion_score`: 구조 요소 데이터 완성도에 따라 책정
+  - `structural_elements`: 각 구조 부재의 상세 정보
 
-  ### 2) `슬래브일람표`
-  ```json
-  {
-    "slabs": [
-      {
-        "name": "",
-        "thk": 0,
-        "type": "",
-        "reinforcementShort": {
-          "x1": "", "x2": "", "x3": "", "x4": "", "x5": ""
-        },
-        "reinforcementLong": {
-          "y1": "", "y2": "", "y3": "", "y4": "", "y5": ""
-        }
-      }
-    ],
-    "unit": "mm"
-  }
-  ```
+  ### 2) **슬래브일람표**
+  - `drawing_type`: "일람표"
+  - `document_type`: "슬래브일람표"
+  - `structural_elements`: 슬래브별 두께, 철근 정보
 
-  ### 3) `설계개요`
-  ```json
-  {
-    "project": {
-      "projectName": "",
-      "siteLocation": "",
-      "zoning": "",
-      "landAreaM2": 0,
-      "buildingAreaM2": 0,
-      "totalFloorAreaM2": 0,
-      "buildingCoverageRatio": "0.00%",
-      "floorAreaRatio": "0.00%",
-      "buildingHeightM": 0,
-      "structureType": "",
-      "floors": { "above": 0, "below": 0 },
-      "households": 0
-    },
-    "parking": {
-      "total": 0,
-      "aboveGround": 0,
-      "underground": 0,
-      "compact": 0,
-      "accessible": 0,
-      "ev": 0
-    },
-    "unitMix": [
-      {
-        "type": "59A",
-        "count": 0,
-        "exclusiveAreaM2": 0.0,
-        "supplyAreaM2": 0.0,
-        "contractAreaM2": 0.0,
-        "ratio": "0.00%"
-      }
-    ],
-    "communityFacilities": {
-      "childcareM2": 0,
-      "libraryM2": 0,
-      "seniorCenterM2": 0,
-      "fitnessM2": 0
-    }
-  }
-  ```
+  ### 3) **설계개요**
+  - `drawing_type`: "개요"
+  - `document_type`: "설계개요"
+  - 프로젝트 기본 정보를 메타데이터로 구조화
+  - `unit_mix`, `facilities`: 세대 구성, 부대시설 정보
 
-  ### 4) `기타`
-  ```json
-  {
-    "content": {
-      "headings": [],
-      "paragraphs": []
-    }
-  }
-  ```
+  **Self-Query 메타데이터 필드 타입:**
+  - **문자열**: drawing_type, document_type, project_name, site_location, structure_type, zoning
+  - **정수**: page_number, floors_above, floors_below, total_households, parking_total, completion_score
+  - **실수**: land_area, building_area, total_floor_area, building_height
+  - **불린**: has_tables, has_images
 
   ---
 
@@ -150,5 +131,6 @@ template: |
 
   ---
 
-  **위 데이터를 면밀히 분석하여 해당 유형 JSON을 완성하라.**
+  **위 데이터를 면밀히 분석하여 Self-Query 호환 JSON을 완성하라.**
+  **content에는 검색 가능한 자연어 요약을, metadata에는 구조화된 필터링 가능한 데이터를 포함하라.**
   **출력은 JSON 한 덩어리로만 응답한다.**

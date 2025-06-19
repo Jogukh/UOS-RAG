@@ -4,6 +4,15 @@ from chromadb.utils import embedding_functions
 import os
 from pathlib import Path
 import sys
+import re
+
+# Self-Query 변환 유틸리티 임포트
+try:
+    from src.convert_to_self_query import convert_to_self_query_format
+    HAS_SELF_QUERY_CONVERTER = True
+except ImportError:
+    print("⚠️  Self-Query 변환기를 불러올 수 없습니다.")
+    HAS_SELF_QUERY_CONVERTER = False
 
 # .env 설정 로드
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -50,13 +59,23 @@ def build_rag_database_for_project(project_name, project_metadata_file_path):
     
     print(f"  컬렉션 이름: {collection_name}")
 
+    # 기존 데이터 확인 및 처리
+    action = check_and_handle_existing_data(client, collection_name, project_name)
+    
+    if action == "cancel":
+        return False
+
     # 컬렉션 생성 또는 가져오기
     try:
-        collection = client.get_or_create_collection(
-            name=collection_name,
-            embedding_function=sentence_transformer_ef,
-            metadata={"hnsw:space": "cosine"} # 코사인 유사도 사용
-        )
+        if action == "recreate" or action == "create":
+            collection = client.create_collection(
+                name=collection_name,
+                embedding_function=sentence_transformer_ef,
+                metadata={"hnsw:space": "cosine"} # 코사인 유사도 사용
+            )
+        else:  # append
+            collection = client.get_collection(name=collection_name)
+            
     except Exception as e:
         print(f"  오류: 컬렉션 생성/가져오기 실패 ({collection_name}): {e}")
         return False
@@ -92,77 +111,115 @@ def build_rag_database_for_project(project_name, project_metadata_file_path):
             print(f"    경고: 도면 #{i}의 형식이 올바르지 않습니다. 건너뜁니다.")
             continue
 
-        # 고유 ID 생성 (도면 번호 또는 파일명_페이지번호 조합)
-        drawing_number = drawing_info.get("drawing_number", "근거부족")
-        file_name = drawing_info.get("file_name", "unknown_file")
-        page_number = drawing_info.get("page_number", i+1)
+        # Self-Query 형식인지 확인 (content와 metadata 분리되어 있는지)
+        if "content" in drawing_info and "metadata" in drawing_info:
+            # 이미 Self-Query 형식
+            content = drawing_info["content"]
+            metadata = drawing_info["metadata"].copy()
+            
+            # 기본 메타데이터 보완
+            metadata.update({
+                "project_name": metadata.get("project_name", project_name),
+                "file_name": metadata.get("file_name", f"drawing_{i+1}"),
+                "page_number": metadata.get("page_number", i+1)
+            })
+            
+            unique_id = f"{project_name}_{metadata.get('drawing_number', f'DWG-{i+1:03d}')}_{metadata['page_number']}"
         
-        if drawing_number != "근거 부족" and drawing_number != "근거부족":
-            unique_id = f"{project_name}_{drawing_number}_{page_number}"
         else:
-            unique_id = f"{project_name}_{file_name}_p{page_number}"
+            # 기존 형식을 Self-Query 형식으로 변환
+            drawing_number = drawing_info.get("drawing_number", f"DWG-{i+1:03d}")
+            file_name = drawing_info.get("file_name", "unknown_file")
+            page_number = drawing_info.get("page_number", i+1)
+            
+            unique_id = f"{project_name}_{drawing_number}_{page_number}"
+            
+            # content 생성 (검색 가능한 자연어 텍스트)
+            content_parts = [
+                f"프로젝트: {project_name}",
+                f"파일명: {file_name}",
+                f"페이지: {page_number}",
+                f"도면번호: {drawing_number}",
+                f"도면제목: {drawing_info.get('drawing_title', '정보 없음')}",
+                f"도면유형: {drawing_info.get('drawing_type', '정보 없음')}",
+                f"축척: {drawing_info.get('scale', '정보 없음')}"
+            ]
+            
+            # 면적 정보 추가
+            area_info = drawing_info.get("area_info", {})
+            if area_info:
+                area_parts = []
+                for area_type, area_value in area_info.items():
+                    if area_value and area_value != "정보 없음":
+                        area_parts.append(f"{area_type}: {area_value}")
+                if area_parts:
+                    content_parts.append(f"면적정보: {', '.join(area_parts)}")
+            
+            # 주요 공간 정보 추가
+            room_list = drawing_info.get("room_list", [])
+            if room_list:
+                if isinstance(room_list, list):
+                    room_names = [room.get("name", "") if isinstance(room, dict) else str(room) for room in room_list]
+                elif isinstance(room_list, str):
+                    room_names = [room_list]
+                else:
+                    room_names = []
+                    
+                room_names = [name for name in room_names if name]
+                if room_names:
+                    content_parts.append(f"주요공간: {', '.join(room_names)}")
+            
+            # 층수 정보 추가
+            level_info = drawing_info.get("level_info", [])
+            if level_info:
+                if isinstance(level_info, list):
+                    level_names = [str(level) for level in level_info if level]
+                elif isinstance(level_info, str):
+                    level_names = [level_info]
+                else:
+                    level_names = []
+                    
+                if level_names:
+                    content_parts.append(f"층수정보: {', '.join(level_names)}")
+            
+            content = ". ".join(content_parts) + "."
+            
+            # metadata 생성 (검색 필터링 가능한 구조화된 데이터)
+            metadata = {
+                "drawing_number": drawing_number,
+                "drawing_title": drawing_info.get("drawing_title", ""),
+                "drawing_type": drawing_info.get("drawing_type", "unknown"),
+                "scale": drawing_info.get("scale", "정보 없음"),
+                "project_name": project_name,
+                "file_name": file_name,
+                "page_number": int(page_number) if str(page_number).isdigit() else 1,
+                "has_tables": bool(drawing_info.get("tables_extracted")),
+                "has_dimensions": bool(drawing_info.get("dimension_list")),
+                "room_count": len(room_list) if room_list else 0,
+                "completion_score": 80 if drawing_info.get("drawing_type") != "unknown" else 30
+            }
+            
+            # 면적 정보를 숫자로 변환
+            if area_info:
+                for area_key, area_value in area_info.items():
+                    if area_value and area_value != "정보 없음":
+                        # 숫자 추출
+                        numbers = re.findall(r'\d+\.?\d*', str(area_value))
+                        if numbers:
+                            numeric_value = float(numbers[0])
+                            if "대지" in area_key:
+                                metadata["site_area"] = numeric_value
+                            elif "건축" in area_key:
+                                metadata["building_area"] = numeric_value
+                            elif "연면적" in area_key or "총면적" in area_key:
+                                metadata["total_floor_area"] = numeric_value
+                            elif "전용" in area_key:
+                                metadata["exclusive_area"] = numeric_value
+                            elif "공급" in area_key:
+                                metadata["supply_area"] = numeric_value
 
-        # 문서(텍스트 청크) 생성 - 추출된 메타데이터 기반
-        text_chunk_parts = [
-            f"프로젝트: {project_name}",
-            f"파일명: {file_name}",
-            f"페이지: {page_number}",
-            f"도면번호: {drawing_number}",
-            f"도면제목: {drawing_info.get('drawing_title', '정보 없음')}",
-            f"도면유형: {drawing_info.get('drawing_type', '정보 없음')}",
-            f"축척: {drawing_info.get('scale', '정보 없음')}"
-        ]
-        
-        # 면적 정보 추가
-        area_info = drawing_info.get("area_info", {})
-        if area_info:
-            area_parts = []
-            for area_type, area_value in area_info.items():
-                area_parts.append(f"{area_type}: {area_value}")
-            if area_parts:
-                text_chunk_parts.append(f"면적정보: {', '.join(area_parts)}")
-
-        # 공간 목록 추가
-        room_list = drawing_info.get("room_list", [])
-        if room_list:
-            text_chunk_parts.append(f"주요공간: {', '.join(room_list)}")
-
-        # 층 정보 추가
-        level_info = drawing_info.get("level_info", [])
-        if level_info:
-            text_chunk_parts.append(f"층정보: {', '.join(level_info)}")
-
-        # 치수 정보 추가 (일부만)
-        dimensions = drawing_info.get("dimensions", [])
-        if dimensions:
-            dim_preview = dimensions[:5]  # 처음 5개만
-            text_chunk_parts.append(f"주요치수: {', '.join(dim_preview)}")
-
-        # 텍스트 스니펫 추가 (검색 품질 향상)
-        raw_text_snippet = drawing_info.get("raw_text_snippet", "")
-        if raw_text_snippet:
-            text_chunk_parts.append(f"텍스트내용: {raw_text_snippet}")
-
-        # 최종 문서 텍스트 생성
-        document_text = ". ".join(filter(None, text_chunk_parts))
-        
-        # 메타데이터 구성 (ChromaDB 저장용)
-        metadata = {
-            "project_name": project_name,
-            "file_name": file_name,
-            "page_number": str(page_number),
-            "drawing_number": drawing_number,
-            "drawing_title": drawing_info.get("drawing_title", ""),
-            "drawing_type": drawing_info.get("drawing_type", ""),
-            "scale": drawing_info.get("scale", ""),
-            "area_info_json": json.dumps(area_info, ensure_ascii=False), # JSON 문자열로 저장
-            "room_list_str": ",".join(room_list), # 리스트를 문자열로
-            "level_info_str": ",".join(level_info), # 리스트를 문자열로
-            "full_path": drawing_info.get("full_path", ""),
-            "extracted_at": drawing_info.get("extracted_at", "")
-        }
-
-        documents_to_add.append(document_text)
+        # 문서와 메타데이터를 컬렉션에 추가
+        documents_to_add.append(content)
         metadatas_to_add.append(metadata)
         ids_to_add.append(unique_id)
         doc_count += 1
@@ -247,6 +304,54 @@ def build_all_projects_rag():
     print(f"  ✅ 성공한 프로젝트: {processed_projects}개")
     print(f"  ❌ 실패한 프로젝트: {failed_projects}개")
     print(f"  📁 ChromaDB 저장 위치: {CHROMA_DB_PATH}")
+
+def check_and_handle_existing_data(client, collection_name, project_name):
+    """
+    기존 컬렉션 데이터 확인 및 처리
+    """
+    try:
+        # 기존 컬렉션 확인
+        existing_collection = client.get_collection(name=collection_name)
+        existing_count = existing_collection.count()
+        
+        if existing_count > 0:
+            print(f"⚠️  기존 컬렉션 '{collection_name}'에 {existing_count}개의 문서가 있습니다.")
+            print(f"프로젝트 '{project_name}'의 새 데이터를 추가하려면 기존 데이터를 처리해야 합니다.")
+            print("\n옵션을 선택하세요:")
+            print("1. 기존 데이터 삭제 후 새로 구축 (권장)")
+            print("2. 기존 데이터에 추가")
+            print("3. 취소")
+            
+            while True:
+                choice = input("\n선택 (1/2/3): ").strip()
+                
+                if choice == "1":
+                    print(f"🗑️  기존 컬렉션 '{collection_name}' 삭제 중...")
+                    client.delete_collection(collection_name)
+                    print("✅ 기존 컬렉션이 삭제되었습니다.")
+                    return "recreate"
+                
+                elif choice == "2":
+                    print(f"📝 기존 컬렉션에 데이터를 추가합니다.")
+                    return "append"
+                
+                elif choice == "3":
+                    print("❌ 작업이 취소되었습니다.")
+                    return "cancel"
+                
+                else:
+                    print("올바른 번호를 선택해주세요 (1, 2, 3)")
+        
+        else:
+            print(f"✅ 컬렉션 '{collection_name}'가 비어있습니다. 새로 구축합니다.")
+            # 빈 컬렉션도 삭제 후 재생성
+            client.delete_collection(collection_name)
+            return "recreate"
+            
+    except Exception as e:
+        # 컬렉션이 존재하지 않는 경우
+        print(f"📝 새 컬렉션 '{collection_name}'을 생성합니다.")
+        return "create"
 
 if __name__ == "__main__":
     print("🚀 프로젝트별 RAG 데이터베이스 구축을 시작합니다...")
