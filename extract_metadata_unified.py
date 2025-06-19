@@ -95,22 +95,19 @@ class UnifiedMetadataExtractor:
         self._initialize_llm()
     
     def _initialize_llm(self):
-        """LLM 초기화 - Ollama 서버와 연결"""
-        if not HAS_OLLAMA:
-            print("⚠️  langchain-ollama가 설치되지 않았습니다.")
-            return
-            
+        """LLM 초기화 - Multi-LLM Wrapper 사용"""
+        # Multi-LLM Wrapper 사용
         try:
-            # Ollama ChatOllama 연결
-            self.llm = ChatOllama(
-                model=self.model_name,
-                base_url="http://localhost:11434",
+            sys.path.append(str(Path(__file__).parent / "src"))
+            from multi_llm_wrapper import get_llm
+            
+            self.llm = get_llm(
                 temperature=0.1,  # 메타데이터 추출은 일관성이 중요
                 num_predict=1024,  # 메타데이터 추출용으로 충분한 토큰
                 timeout=60,  # 타임아웃 설정
             )
             
-            print(f"✅ LLM 모델 '{self.model_name}' Ollama로 초기화 완료")
+            print(f"✅ LLM 초기화 완료 - 제공자: {self.llm.get_provider()}, 모델: {self.llm.get_model_name()}")
             
         except Exception as e:
             print(f"❌ LLM 초기화 실패: {e}")
@@ -208,8 +205,11 @@ class UnifiedMetadataExtractor:
             return self.prompt_manager.format_prompt(
                 "pdf_metadata_extraction",
                 file_name=file_name,
-                text_length=len(truncated_text),
-                text_content=truncated_text
+                page_number=1,  # 기본값
+                text_content=truncated_text,
+                html_content="",  # 기본값 
+                tables_data="",  # 기본값
+                has_images=False  # 기본값
             )
         else:
             # 기본 프롬프트 (프롬프트 매니저가 없을 때)
@@ -253,8 +253,8 @@ class UnifiedMetadataExtractor:
             print(f"   🤖 LLM 메타데이터 추출 시작: {file_name}")
             print(f"   📋 텍스트 길이: {len(text_content)}자")
             
-            # LangChain ChatOllama 호출
-            response = self.llm.invoke(prompt).content
+            # Multi-LLM Wrapper 호출
+            response = self.llm.invoke(prompt)
             
             print(f"   🧹 LLM 응답 정리 중...")
             
@@ -562,6 +562,289 @@ class UnifiedMetadataExtractor:
         
         return results
 
+    def _create_selfquery_conversion_prompt(self, metadata: Dict[str, Any], file_name: str) -> str:
+        """기존 메타데이터를 Self-Query 형식으로 변환하는 프롬프트 생성"""
+        
+        metadata_str = json.dumps(metadata, ensure_ascii=False, indent=2)
+        
+        if self.prompt_manager:
+            # 프롬프트 매니저에서 Self-Query 변환 프롬프트 사용
+            try:
+                return self.prompt_manager.format_prompt(
+                    "convert_to_self_query",
+                    file_name=file_name,
+                    original_metadata=metadata_str
+                )
+            except Exception as e:
+                print(f"   ⚠️ 프롬프트 매니저 사용 실패: {e}")
+                # fallback to default prompt
+                pass
+        
+        # 기본 Self-Query 변환 프롬프트
+        return f"""
+기존 메타데이터를 Self-Query Retriever 호환 형식으로 변환해주세요.
+
+파일명: {file_name}
+기존 메타데이터:
+{metadata_str}
+
+다음 Self-Query 형식으로 변환해주세요:
+{{
+  "page_content": "문서의 주요 내용 요약 (한 문단으로)",
+  "metadata": {{
+    "drawing_number": "도면번호 (string)",
+    "drawing_title": "도면 제목 (string)",
+    "drawing_type": "도면 유형 (string)",
+    "project_name": "프로젝트명 (string)",
+    "project_address": "프로젝트 주소 (string)",
+    "file_name": "파일명 (string)",
+    "page_number": 페이지 번호 (integer),
+    "has_tables": 테이블 포함 여부 (boolean),
+    "has_images": 이미지 포함 여부 (boolean),
+    "land_area": 대지면적 (float, 숫자만),
+    "building_area": 건축면적 (float, 숫자만),
+    "total_floor_area": 연면적 (float, 숫자만),
+    "building_height": 건물높이 (float, 숫자만),
+    "floors_above": 지상층수 (integer),
+    "floors_below": 지하층수 (integer),
+    "parking_spaces": 주차대수 (integer),
+    "apartment_units": 세대수 (integer),
+    "building_coverage_ratio": 건폐율 (float, 소수점),
+    "floor_area_ratio": 용적률 (float, 소수점),
+    "structure_type": "구조형식 (string)",
+    "main_use": "주용도 (string)",
+    "approval_date": "승인일자 (string, YYYY-MM-DD 형식)",
+    "design_firm": "설계사 (string)",
+    "construction_firm": "시공사 (string)",
+    "room_list": ["방 목록 (array of strings)"],
+    "extracted_at": "추출일시 (string, ISO 8601 형식)"
+  }}
+}}
+
+중요사항:
+1. metadata의 모든 값은 검색/필터링 가능한 타입(string, integer, float, boolean)이어야 합니다.
+2. 숫자 값은 단위를 제거하고 숫자만 포함해주세요.
+3. 정보가 없는 경우 null을 사용해주세요.
+4. JSON 형식만 출력하고 다른 설명은 포함하지 마세요.
+"""
+
+    @trace_llm_call(name="Convert to Self-Query Format")
+    def convert_to_selfquery_format(self, metadata: Dict[str, Any], file_name: str) -> Dict[str, Any]:
+        """기존 메타데이터를 Self-Query 형식으로 변환"""
+        
+        if not self.llm:
+            return self._fallback_selfquery_conversion(metadata, file_name)
+        
+        try:
+            prompt = self._create_selfquery_conversion_prompt(metadata, file_name)
+            
+            print(f"   🔄 Self-Query 형식으로 변환 중: {file_name}")
+            
+            # Multi-LLM Wrapper 호출
+            response = self.llm.invoke(prompt)
+            
+            # JSON 응답 파싱
+            try:
+                cleaned_response = self._clean_json_response(response)
+                selfquery_metadata = json.loads(cleaned_response)
+                
+                # 필수 필드 확인 및 추가
+                if "metadata" not in selfquery_metadata:
+                    selfquery_metadata["metadata"] = {}
+                
+                # 파일 정보 강제 설정
+                selfquery_metadata["metadata"]["file_name"] = file_name
+                selfquery_metadata["metadata"]["extracted_at"] = datetime.now().isoformat()
+                
+                print(f"   ✅ Self-Query 변환 완료")
+                return selfquery_metadata
+                
+            except json.JSONDecodeError as e:
+                print(f"   ⚠️ Self-Query 변환 JSON 파싱 실패: {e}")
+                return self._fallback_selfquery_conversion(metadata, file_name)
+                
+        except Exception as e:
+            print(f"   ❌ Self-Query 변환 실패: {e}")
+            return self._fallback_selfquery_conversion(metadata, file_name)
+
+    def _fallback_selfquery_conversion(self, metadata: Dict[str, Any], file_name: str) -> Dict[str, Any]:
+        """Self-Query 변환 실패 시 기본 변환"""
+        
+        # 기존 메타데이터에서 정보 추출
+        original_meta = metadata.get("metadata", {})
+        content = metadata.get("content", f"{file_name}에서 추출된 내용")
+        
+        # Self-Query 형식으로 변환
+        selfquery_format = {
+            "page_content": content,
+            "metadata": {
+                "drawing_number": original_meta.get("drawing_number"),
+                "drawing_title": original_meta.get("drawing_title", file_name.replace('.pdf', '')),
+                "drawing_type": original_meta.get("drawing_type", "기타"),
+                "project_name": original_meta.get("project_name", "Unknown"),
+                "project_address": original_meta.get("project_address"),
+                "file_name": file_name,
+                "page_number": 1,
+                "has_tables": original_meta.get("has_tables", False),
+                "has_images": original_meta.get("has_images", False),
+                "land_area": self._convert_to_float(original_meta.get("land_area")),
+                "building_area": self._convert_to_float(original_meta.get("building_area")),
+                "total_floor_area": self._convert_to_float(original_meta.get("total_floor_area")),
+                "building_height": self._convert_to_float(original_meta.get("building_height")),
+                "floors_above": self._convert_to_int(original_meta.get("floors_above")),
+                "floors_below": self._convert_to_int(original_meta.get("floors_below")),
+                "parking_spaces": self._convert_to_int(original_meta.get("parking_spaces")),
+                "apartment_units": self._convert_to_int(original_meta.get("apartment_units")),
+                "building_coverage_ratio": self._convert_to_float(original_meta.get("building_coverage_ratio")),
+                "floor_area_ratio": self._convert_to_float(original_meta.get("floor_area_ratio")),
+                "structure_type": original_meta.get("structure_type"),
+                "main_use": original_meta.get("main_use"),
+                "approval_date": original_meta.get("approval_date"),
+                "design_firm": original_meta.get("design_firm"),
+                "construction_firm": original_meta.get("construction_firm"),
+                "room_list": original_meta.get("room_list", []),
+                "extracted_at": datetime.now().isoformat()
+            }
+        }
+        
+        return selfquery_format
+
+    def _convert_to_float(self, value) -> Optional[float]:
+        """값을 float로 변환 (단위 제거)"""
+        if value is None:
+            return None
+        
+        try:
+            # 문자열인 경우 숫자만 추출
+            if isinstance(value, str):
+                # 숫자와 소수점만 추출
+                import re
+                numbers = re.findall(r'\d+\.?\d*', value.replace(',', ''))
+                if numbers:
+                    return float(numbers[0])
+                return None
+            
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    def _convert_to_int(self, value) -> Optional[int]:
+        """값을 int로 변환"""
+        if value is None:
+            return None
+        
+        try:
+            if isinstance(value, str):
+                # 숫자만 추출
+                import re
+                numbers = re.findall(r'\d+', value.replace(',', ''))
+                if numbers:
+                    return int(numbers[0])
+                return None
+            
+            return int(float(value))  # float를 거쳐서 int로 변환
+        except (ValueError, TypeError):
+            return None
+
+    def process_existing_metadata_files(self, project_name: str) -> Dict[str, Any]:
+        """기존 메타데이터 JSON 파일들을 Self-Query 형식으로 변환"""
+        
+        print(f"\n🔄 기존 메타데이터 파일을 Self-Query 형식으로 변환 시작")
+        print(f"📁 프로젝트: {project_name}")
+        print("=" * 60)
+        
+        start_time = time.time()
+        
+        # 프로젝트 폴더 찾기
+        project_paths = []
+        direct_path = self.uploads_root_dir / project_name
+        if direct_path.exists():
+            project_paths.append(direct_path)
+        
+        for folder in self.uploads_root_dir.iterdir():
+            if folder.is_dir() and project_name in folder.name:
+                project_paths.append(folder)
+        
+        if not project_paths:
+            print(f"❌ 프로젝트 폴더를 찾을 수 없습니다: {project_name}")
+            return {"error": "프로젝트 폴더 없음"}
+        
+        project_path = project_paths[0]
+        print(f"📁 프로젝트 폴더: {project_path}")
+        
+        # 메타데이터 폴더 확인
+        metadata_folder = project_path / "metadata"
+        if not metadata_folder.exists():
+            print(f"❌ 메타데이터 폴더가 없습니다: {metadata_folder}")
+            # 프로젝트 루트에서 메타데이터 파일 찾기
+            metadata_files = list(project_path.glob("*_metadata.json"))
+        else:
+            metadata_files = list(metadata_folder.glob("*_metadata.json"))
+        
+        if not metadata_files:
+            print(f"❌ 메타데이터 JSON 파일을 찾을 수 없습니다")
+            return {"error": "메타데이터 파일 없음"}
+        
+        print(f"📄 발견된 메타데이터 파일: {len(metadata_files)}개")
+        
+        results = {
+            "project_name": project_name,
+            "processing_time": 0,
+            "conversion_results": [],
+            "summary": {
+                "total_files": len(metadata_files),
+                "success_count": 0,
+                "error_count": 0
+            }
+        }
+        
+        # 각 메타데이터 파일 처리
+        for metadata_file in metadata_files:
+            print(f"🔄 변환 중: {metadata_file.name}")
+            
+            try:
+                # 기존 메타데이터 로드
+                with open(metadata_file, 'r', encoding='utf-8') as f:
+                    original_metadata = json.load(f)
+                
+                # Self-Query 형식으로 변환
+                selfquery_metadata = self.convert_to_selfquery_format(
+                    original_metadata, 
+                    metadata_file.name.replace('_metadata.json', '')
+                )
+                
+                # 변환된 메타데이터 저장 (기존 파일 덮어쓰기)
+                with open(metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(selfquery_metadata, f, ensure_ascii=False, indent=2)
+                
+                print(f"   💾 Self-Query 형식으로 저장 완료: {metadata_file.name}")
+                
+                results["conversion_results"].append({
+                    "file_name": metadata_file.name,
+                    "success": True,
+                    "original_metadata": original_metadata,
+                    "selfquery_metadata": selfquery_metadata
+                })
+                
+                results["summary"]["success_count"] += 1
+                
+            except Exception as e:
+                print(f"   ❌ 변환 실패: {e}")
+                results["conversion_results"].append({
+                    "file_name": metadata_file.name,
+                    "success": False,
+                    "error": str(e)
+                })
+                results["summary"]["error_count"] += 1
+        
+        results["processing_time"] = time.time() - start_time
+        
+        print(f"\n✅ Self-Query 형식 변환 완료")
+        print(f"⏱️  총 처리 시간: {results['processing_time']:.2f}초")
+        print(f"📊 변환 결과: 성공 {results['summary']['success_count']}개, 실패 {results['summary']['error_count']}개")
+        
+        return results
+
 def main():
     parser = argparse.ArgumentParser(
         description="통합 메타데이터 추출기 (PDF + DWG 지원)",
@@ -579,6 +862,9 @@ def main():
   
   # PDF와 DWG 모두 처리
   python extract_metadata_unified.py --project_name="부산장안지구" --file_types=pdf,dwg
+  
+  # 기존 메타데이터를 Self-Query 형식으로 변환
+  python extract_metadata_unified.py --project_name="부산장안지구" --convert_to_selfquery
         """
     )
     
@@ -596,8 +882,30 @@ def main():
         help="처리할 파일 형식 (pdf, dwg, 또는 pdf,dwg). 기본값: pdf,dwg"
     )
     
+    parser.add_argument(
+        "--convert_to_selfquery",
+        action="store_true",
+        help="기존 메타데이터 JSON 파일들을 Self-Query 형식으로 변환"
+    )
+    
     args = parser.parse_args()
     
+    # 통합 메타데이터 추출기 생성
+    extractor = UnifiedMetadataExtractor()
+    
+    # Self-Query 변환 모드
+    if args.convert_to_selfquery:
+        results = extractor.process_existing_metadata_files(args.project_name)
+        
+        # 결과 저장
+        output_file = f"selfquery_conversion_{args.project_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        
+        print(f"💾 변환 결과 저장: {output_file}")
+        return
+    
+    # 일반 메타데이터 추출 모드
     # 파일 형식 파싱
     file_types = {ft.strip().lower() for ft in args.file_types.split(",")}
     valid_types = {"pdf", "dwg"}
@@ -608,7 +916,6 @@ def main():
         sys.exit(1)
     
     # 통합 메타데이터 추출기 실행
-    extractor = UnifiedMetadataExtractor()
     results = extractor.process_project(args.project_name, file_types)
     
     # 결과 저장

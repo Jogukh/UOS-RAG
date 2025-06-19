@@ -3,6 +3,7 @@ from chromadb.utils import embedding_functions
 import argparse
 import os
 import sys
+import re  # re 모듈 추가
 from pathlib import Path
 
 # .env 설정 로드
@@ -10,7 +11,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 try:
     from env_config import get_env_config
     env_config = get_env_config()
-    print(f"📋 .env 기반 설정 로드됨 - 모델: {env_config.model_config.model_name}")
+    print(f"📋 .env 기반 설정 로드됨 - LLM: {env_config.llm_provider_config.provider}, 임베딩: {env_config.embedding_config.provider}")
     HAS_ENV_CONFIG = True
 except ImportError:
     print("⚠️  env_config를 불러올 수 없습니다. 기본 설정을 사용합니다.")
@@ -43,6 +44,20 @@ except ImportError:
         def decorator(func):
             return func
         return decorator
+
+# Multi-LLM Wrapper 추가
+try:
+    from src.multi_llm_wrapper import MultiLLMWrapper
+    HAS_MULTI_LLM = True
+    print("🔧 Multi-LLM Wrapper 로드됨")
+except ImportError:
+    try:
+        from multi_llm_wrapper import MultiLLMWrapper
+        HAS_MULTI_LLM = True
+        print("🔧 Multi-LLM Wrapper 로드됨")
+    except ImportError:
+        print("⚠️  Multi-LLM Wrapper를 불러올 수 없습니다.")
+        HAS_MULTI_LLM = False
 
 # Ollama API 사용
 try:
@@ -98,21 +113,58 @@ def query_rag_database(query_text, n_results=3, project_name=None):
     # ChromaDB 클라이언트 초기화
     client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     
-    # Sentence Transformer 임베딩 함수 설정
-    sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name=EMBEDDING_MODEL_NAME
-    )
+    # 환경 설정에 따른 임베딩 함수 설정
+    if env_config and env_config.embedding_config.provider == "openai":
+        print(f"🔧 OpenAI 임베딩 모델 사용: {env_config.embedding_config.openai_model}")
+        embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+            api_key=env_config.llm_provider_config.openai_api_key,
+            model_name=env_config.embedding_config.openai_model
+        )
+    else:
+        # fallback: SentenceTransformer 사용
+        fallback_model = "all-MiniLM-L6-v2"
+        print(f"🔧 SentenceTransformer 임베딩 모델 사용: {fallback_model}")
+        embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=fallback_model
+        )
 
-    # 프로젝트별 컬렉션 이름 생성
+    # 프로젝트별 컬렉션 이름 생성 (build_rag_db_v2.py와 동일한 로직)
     if project_name:
-        collection_name = f"drawings_{project_name}".replace(" ", "_").replace("-", "_").lower()
-        collection_name = "".join(c if c.isalnum() or c == "_" else "_" for c in collection_name)
+        # build_rag_db_v2.py와 동일한 변환 로직 사용
+        korean_to_english = {
+            "부산": "busan",
+            "장안": "jangan", 
+            "프로젝트": "project",
+            "정보": "info",
+            "도면": "drawing"
+        }
+        
+        # 한글을 영어로 변환
+        translated_name = project_name
+        for korean, english in korean_to_english.items():
+            translated_name = translated_name.replace(korean, english)
+        
+        # 기본 변환
+        collection_name = f"{translated_name}".replace(" ", "_").replace("-", "_").lower()
+        
+        # ASCII 문자와 숫자, 언더스코어만 허용
+        collection_name = "".join(c if (c.isascii() and c.isalnum()) or c == "_" else "_" for c in collection_name)
+        
+        # 연속된 언더스코어 제거
+        collection_name = re.sub(r'_+', '_', collection_name)
+        
+        # 길이 제한 (3-63자)
+        collection_name = collection_name[:63]
+        
+        # 시작과 끝이 영문/숫자인지 확인
+        if not collection_name or not collection_name[0].isalnum():
+            collection_name = "proj_" + collection_name.lstrip('_')
+        if not collection_name[-1].isalnum():
+            collection_name = collection_name.rstrip('_') + "_coll"
         
         # 지정된 프로젝트 컬렉션 검색
         try:
-            collection = client.get_collection(
-                name=collection_name
-            )
+            collection = client.get_collection(name=collection_name, embedding_function=embedding_function)
             print(f"프로젝트 '{project_name}' 컬렉션에서 검색 중...")
         except Exception as e:
             print(f"프로젝트 '{project_name}' 컬렉션을 찾을 수 없습니다: {e}")
@@ -122,24 +174,21 @@ def query_rag_database(query_text, n_results=3, project_name=None):
                 print(f"  - {col}")
             return None
     else:
-        # 모든 프로젝트에서 검색 (여러 컬렉션 통합 검색)
+        # 모든 프로젝트에서 검색 (모든 컬렉션 통합 검색)
         available_collections = get_available_collections()
-        drawings_collections = [col for col in available_collections if col.startswith("drawings_")]
         
-        if not drawings_collections:
-            print("검색 가능한 도면 컬렉션이 없습니다.")
+        if not available_collections:
+            print("검색 가능한 컬렉션이 없습니다.")
             return None
         
-        print(f"모든 프로젝트({len(drawings_collections)}개 컬렉션)에서 검색 중...")
+        print(f"모든 컬렉션({len(available_collections)}개)에서 검색 중...")
         
         # 각 컬렉션에서 검색하고 결과 통합
         all_results = {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
         
-        for col_name in drawings_collections:
+        for col_name in available_collections:
             try:
-                collection = client.get_collection(
-                    name=col_name
-                )
+                collection = client.get_collection(name=col_name, embedding_function=embedding_function)
                 
                 results = collection.query(
                     query_texts=[query_text],
@@ -192,14 +241,44 @@ def query_rag_database(query_text, n_results=3, project_name=None):
 
 @trace_tool_call(name="initialize_llm")
 def initialize_llm():
-    """Ollama API 기반 텍스트 LLM을 초기화합니다."""
+    """Multi-LLM Wrapper를 사용하여 GPT-4.1-nano 또는 Ollama를 초기화합니다."""
+    
+    if not HAS_ENV_CONFIG or not env_config:
+        print("❌ 환경 설정을 불러올 수 없어 LLM을 초기화할 수 없습니다.")
+        return None
+    
+    if not HAS_MULTI_LLM:
+        print("❌ Multi-LLM Wrapper를 불러올 수 없어 LLM을 초기화할 수 없습니다.")
+        return None
+    
+    try:
+        # 환경 설정에서 제공자 정보 가져오기
+        provider = env_config.llm_provider_config.provider
+        print(f"🔧 LLM 제공자: {provider}")
+        
+        # MultiLLMWrapper 초기화
+        llm_wrapper = MultiLLMWrapper(provider=provider)
+        print(f"✅ {provider.upper()} LLM이 성공적으로 초기화되었습니다.")
+        
+        return {
+            "llm_wrapper": llm_wrapper,
+            "provider": provider,
+            "type": "multi_llm"
+        }
+        
+    except Exception as e:
+        print(f"❌ LLM 초기화 중 오류 발생: {e}")
+        return None
+
+def initialize_ollama_fallback():
+    """기존 Ollama 방식으로 fallback"""
     if not HAS_OLLAMA:
-        print("requests가 없어 LLM 초기화를 건너뜁니다.")
+        print("requests가 없어 Ollama fallback도 불가능합니다.")
         return None
     
     # Ollama 서버 연결 테스트
     ollama_url = "http://localhost:11434"
-    model_name = LLM_MODEL_PATH  # gemma3:12b-it-qat
+    model_name = "gemma3:12b-it-qat"  # 기본값
     
     try:
         # Ollama 서버 상태 확인
@@ -217,28 +296,66 @@ def initialize_llm():
                 }
             else:
                 print(f"❌ 모델 '{model_name}'을 찾을 수 없습니다.")
-                print(f"사용 가능한 모델들: {model_names}")
                 return None
         else:
-            print(f"❌ Ollama 서버에 연결할 수 없습니다. 상태 코드: {response.status_code}")
+            print(f"❌ Ollama 서버에 연결할 수 없습니다.")
             return None
             
-    except requests.exceptions.ConnectionError:
-        print("❌ Ollama 서버가 실행되지 않았습니다. 'ollama serve' 명령으로 서버를 시작하세요.")
-        return None
     except Exception as e:
-        print(f"❌ LLM 초기화 중 오류 발생: {e}")
+        print(f"❌ Ollama fallback 실패: {e}")
         return None
 
-@trace_llm_call(name="ollama_generate_answer", run_type="llm")
+@trace_llm_call(name="generate_answer", run_type="llm")
 def generate_answer_with_llm(llm_components, query_text, retrieved_documents_text):
-    """검색된 문서를 바탕으로 Ollama API를 사용하여 답변을 생성합니다."""
+    """검색된 문서를 바탕으로 Multi-LLM을 사용하여 답변을 생성합니다."""
     if not llm_components:
         return "LLM이 초기화되지 않아 답변을 생성할 수 없습니다."
 
-    if llm_components.get("type") != "ollama":
-        return "Ollama API가 아닌 다른 LLM 타입은 지원되지 않습니다."
+    llm_type = llm_components.get("type")
     
+    # Multi-LLM 방식 사용
+    if llm_type == "multi_llm":
+        return generate_answer_with_multi_llm(llm_components, query_text, retrieved_documents_text)
+    
+    # 기존 Ollama 방식 fallback
+    elif llm_type == "ollama":
+        return generate_answer_with_ollama(llm_components, query_text, retrieved_documents_text)
+    
+    else:
+        return f"지원되지 않는 LLM 타입입니다: {llm_type}"
+
+def generate_answer_with_multi_llm(llm_components, query_text, retrieved_documents_text):
+    """Multi-LLM Wrapper를 사용하여 답변 생성"""
+    try:
+        llm_wrapper = llm_components["llm_wrapper"]
+        provider = llm_components["provider"]
+        
+        # 프롬프트 파일에서 템플릿 로드
+        prompt_template = load_prompt_template(PROMPT_FILE_PATH)
+        
+        # 프롬프트에 변수 채우기
+        formatted_prompt = prompt_template.format(
+            retrieved_documents_text=retrieved_documents_text, 
+            query_text=query_text
+        )
+        
+        print(f"🤖 {provider.upper()}로 답변 생성 중...")
+        
+        # LLM 호출
+        response = llm_wrapper.invoke(formatted_prompt)
+        
+        if response:
+            print(f"✅ {provider.upper()} 답변 생성 완료")
+            return response
+        else:
+            return "답변을 생성할 수 없습니다."
+            
+    except Exception as e:
+        print(f"❌ Multi-LLM 답변 생성 실패: {e}")
+        return f"답변 생성 중 오류가 발생했습니다: {str(e)}"
+
+def generate_answer_with_ollama(llm_components, query_text, retrieved_documents_text):
+    """기존 Ollama API를 사용하여 답변 생성 (fallback)"""
     ollama_url = llm_components["ollama_url"]
     model_name = llm_components["model_name"]
     
@@ -383,10 +500,20 @@ if __name__ == "__main__":
     if args.list_projects:
         print("사용 가능한 프로젝트 컬렉션:")
         available_collections = get_available_collections()
-        drawings_collections = [col for col in available_collections if col.startswith("drawings_")]
-        for col in drawings_collections:
-            project_name = col.replace("drawings_", "")
-            print(f"  - {project_name}")
+        
+        # 실제 컬렉션 목록 표시
+        if available_collections:
+            for col in available_collections:
+                # 컬렉션별 문서 수 확인
+                try:
+                    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+                    collection = client.get_collection(col)
+                    count = collection.count()
+                    print(f"  - {col}: {count}개 문서")
+                except Exception as e:
+                    print(f"  - {col}: 오류 ({e})")
+        else:
+            print("  사용 가능한 컬렉션이 없습니다.")
         exit(0)
 
     # query가 제공되지 않았을 때 사용법 예시 표시

@@ -19,6 +19,15 @@ except ImportError:
     ChatOllama = None
     HAS_OLLAMA = False
 
+# MultiLLMWrapper import
+try:
+    from .multi_llm_wrapper import MultiLLMWrapper
+except ImportError:
+    try:
+        from multi_llm_wrapper import MultiLLMWrapper
+    except ImportError:
+        MultiLLMWrapper = None
+
 # 절대 import 또는 sys.path 기반 import
 try:
     from prompt_manager import get_prompt_manager
@@ -57,46 +66,35 @@ logger = logging.getLogger(__name__)
 class LLMMetadataExtractor:
     """LLM을 사용한 건축 도면 메타데이터 추출기 (Ollama 연동)"""
     
-    def __init__(self, model_name: str = None, base_url: str = None):
+    def __init__(self, llm_wrapper=None, model_name: str = None, base_url: str = None):
         """
         Args:
-            model_name: 사용할 Ollama 모델명 (None이면 .env에서 로드)
-            base_url: Ollama 서버 주소 (기본값: http://localhost:11434)
+            llm_wrapper: MultiLLMWrapper 인스턴스 (권장)
+            model_name: 사용할 모델명 (None이면 .env에서 로드) - 호환성용
+            base_url: 서버 주소 (Ollama의 경우) - 호환성용
         """
         self.env_config = EnvironmentConfig()
-        self.model_name = model_name or self.env_config.model_config.model_name
         self.prompt_manager = get_prompt_manager()  # 프롬프트 매니저 추가
         
-        # Ollama 서버 설정
-        self.base_url = base_url or get_env_str('OLLAMA_BASE_URL', 'http://localhost:11434')
-        
-        self.llm = None
-        self._initialize_llm()
-        
-    def _initialize_llm(self):
-        """LLM 초기화 - Ollama 서버와 연결"""
-        if not HAS_OLLAMA:
-            logger.error("langchain-ollama가 설치되지 않았습니다.")
-            return
-            
-        try:
-            # LangSmith 추적 설정
-            self.langsmith_tracker = LangSmithTracker()
-            
-            # Ollama ChatOllama 연결
-            self.llm = ChatOllama(
-                model=self.model_name,
-                base_url=self.base_url,
+        # Multi-LLM Wrapper 직접 사용
+        if llm_wrapper is not None and hasattr(llm_wrapper, 'invoke'):
+            self.llm = llm_wrapper
+        else:
+            # 기존 호환성을 위한 fallback
+            from multi_llm_wrapper import get_llm
+            self.llm = get_llm(
+                model_name=model_name,
+                base_url=base_url,
                 temperature=0.1,  # 메타데이터 추출은 일관성이 중요
                 num_predict=1024,  # 메타데이터 추출용으로 충분한 토큰
-                timeout=60,  # 타임아웃 설정
-            )
-            
-            logger.info(f"LLM 모델 '{self.model_name}' Ollama로 초기화 완료 (서버: {self.base_url})")
-            
-        except Exception as e:
-            logger.error(f"LLM 초기화 실패: {e}")
-            self.llm = None
+            timeout=60,  # 타임아웃 설정
+        )
+        
+        logger.info(f"LLM 초기화 완료 - 제공자: {self.llm.get_provider()}, 모델: {self.llm.get_model_name()}")
+        
+    def _initialize_llm(self):
+        """레거시 메서드 - Multi-LLM Wrapper로 대체됨"""
+        pass
 
     def _create_metadata_extraction_prompt(self, text_content: str, file_name: str, page_number: int) -> str:
         """메타데이터 추출을 위한 프롬프트 생성 - 중앙 관리 프롬프트 사용"""
@@ -107,10 +105,13 @@ class LLMMetadataExtractor:
             truncated_text += "..."
         
         return self.prompt_manager.format_prompt(
-            "metadata_extraction",
+            "pdf_metadata_extraction",
             file_name=file_name,
             page_number=page_number,
-            text_content=truncated_text
+            text_content=truncated_text,
+            html_content="",
+            tables_data="",
+            has_images=False
         )
 
     def _create_enhanced_metadata_extraction_prompt(self, text_content: str, file_name: str, 
@@ -142,7 +143,7 @@ class LLMMetadataExtractor:
             tables_str = "\n".join(tables_list)
         
         return self.prompt_manager.format_prompt(
-            "metadata_extraction",
+            "pdf_metadata_extraction",
             file_name=file_name,
             page_number=page_number,
             text_content=truncated_text,
@@ -165,8 +166,8 @@ class LLMMetadataExtractor:
                 text_content, file_name, page_number, html_content, tables_data, has_images
             )
             
-            # LangChain ChatOllama 호출
-            response = self.llm.invoke(prompt).content
+            # Multi-LLM Wrapper 호출
+            response = self.llm.invoke(prompt)
             
             # JSON 응답 파싱 (마크다운 코드 블록 제거)
             try:
@@ -197,6 +198,42 @@ class LLMMetadataExtractor:
         except Exception as e:
             logger.error(f"LLM 메타데이터 추출 중 오류: {e}")
             return self._fallback_regex_extraction(text_content, file_name, page_number)
+
+    def extract_metadata_from_json_self_query(self, raw_json: Dict[str, Any], file_name: str, page_number: int) -> Dict[str, Any]:
+        """
+        이미 JSON으로 추출된 원시 데이터를 LLM을 사용해 Self-Query 형식으로 파싱합니다.
+        
+        Args:
+            raw_json: JSON 형식의 원시 메타데이터 데이터
+            file_name: 원본 파일 이름
+            page_number: 처리된 페이지 번호
+        Returns:
+            파싱된 메타데이터 사전
+        """
+        # raw_json을 문자열로 직렬화
+        json_str = json.dumps(raw_json, ensure_ascii=False)
+        # Self-Query 파싱 프롬프트 생성 (prompt_manager에 'self_query_parsing' 프롬프트 템플릿이 있다고 가정)
+        prompt = self.prompt_manager.format_prompt(
+            "self_query_parsing",
+            json_data=json_str,
+            file_name=file_name,
+            page_number=page_number
+        )
+        try:
+            # LLM 호출
+            response = self.llm.invoke(prompt)
+            # JSON만 남기도록 정리
+            cleaned = self._clean_json_response(response)
+            parsed = json.loads(cleaned)
+            # 기본 필드 추가
+            parsed["file_name"] = file_name
+            parsed["page_number"] = page_number
+            # 유효성 검사 및 정리
+            return self._validate_and_clean_metadata(parsed)
+        except Exception as e:
+            logger.warning(f"Self-Query 형식 파싱 실패: {e}")
+            # 폴백으로 기존 텍스트 기반 추출 사용
+            return self._fallback_regex_extraction(json_str, file_name, page_number)
 
     def _validate_and_clean_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """메타데이터 유효성 검사 및 정리"""

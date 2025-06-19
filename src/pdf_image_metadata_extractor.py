@@ -229,9 +229,9 @@ def main():
     
     # 경로 설정 - 절대 경로로 변경하여 실행 위치에 관계없이 작동하도록 함
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    data_folder = os.path.join(script_dir, "uploads/부산장안지구_프로젝트도면")
-    image_folder = os.path.join(script_dir, "uploads/부산장안지구_프로젝트도면")
-    output_folder = os.path.join(script_dir, "uploads/부산장안지구_프로젝트도면")
+    data_folder = os.path.join(script_dir, "uploads/부산장안_프로젝트도면")
+    image_folder = os.path.join(script_dir, "uploads/부산장안_프로젝트도면")
+    output_folder = os.path.join(script_dir, "uploads/부산장안_프로젝트도면")
     
     print(f"스크립트 디렉토리: {script_dir}")
     print(f"데이터 폴더 경로: {data_folder}")
@@ -241,14 +241,14 @@ def main():
     # data 폴더가 존재하는지 확인
     if not os.path.exists(data_folder):
         print(f"'{data_folder}' 폴더가 존재하지 않습니다.")
-        print("uploads/부산장안지구_프로젝트도면 경로를 찾는 중...")
+        print("uploads/부산장안_프로젝트도면 경로를 찾는 중...")
         
-        # uploads/부산장안지구_프로젝트도면 경로 검색
+        # uploads/부산장안_프로젝트도면 경로 검색
         possible_paths = [
-            os.path.join(script_dir, "../uploads/부산장안지구_프로젝트도면"),
-            os.path.join(os.path.dirname(script_dir), "uploads/부산장안지구_프로젝트도면"),
-            "./uploads/부산장안지구_프로젝트도면",
-            "uploads/부산장안지구_프로젝트도면"
+            os.path.join(script_dir, "uploads/부산장안_프로젝트도면"),
+            os.path.join(os.path.dirname(script_dir), "uploads/부산장안_프로젝트도면"),
+            "uploads/부산장안_프로젝트도면",
+            "uploads/부산장안_프로젝트도면"
         ]
         
         found_path = None
@@ -265,7 +265,7 @@ def main():
             output_folder = found_path
             print(f"모든 작업을 다음 경로에서 수행합니다: {found_path}")
         else:
-            print("uploads/부산장안지구_프로젝트도면 폴더를 찾을 수 없습니다.")
+            print("uploads/부산장안_프로젝트도면 폴더를 찾을 수 없습니다.")
             return
     else:
         print(f"데이터 폴더가 존재합니다: {data_folder}")

@@ -15,6 +15,8 @@ prompt_files:
   system_test: "system_test.yaml"
   gemma_chat_wrapper: "gemma_chat_wrapper.yaml"
   pdf_metadata_extraction: "pdf_metadata_extraction.yaml"
+  convert_to_self_query: "convert_to_self_query.yaml"
+  chatbot: "chatbot.yaml"
 
 # 프롬프트 유형 정의
 prompt_types:

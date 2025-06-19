@@ -84,7 +84,7 @@ class DWGMetadataExtractor:
             logger.error(f"LLM 초기화 실패: {e}")
             self.llm = None
 
-    @trace_llm_call("dwg_file_metadata_extraction", "chain")
+    @trace_llm_call("dwg_file_metadata_extraction", "main_extraction")
     def extract_from_dwg_file(self, dwg_file_path: str, project_base_path: str = None) -> Dict[str, Any]:
         """
         DWG/DXF 파일에서 직접 메타데이터 추출 (XREF 포함)
@@ -99,17 +99,6 @@ class DWGMetadataExtractor:
         if not self.llm:
             logger.error("LLM이 초기화되지 않았습니다.")
             return {}
-        
-        # uploads 하위 폴더명을 프로젝트명으로 추출
-        file_path = Path(dwg_file_path)
-        project_name = "Unknown"
-        
-        # uploads 폴더를 찾아서 그 하위 첫 번째 폴더명을 프로젝트명으로 사용
-        path_parts = file_path.parts
-        if 'uploads' in path_parts:
-            uploads_idx = path_parts.index('uploads')
-            if uploads_idx + 1 < len(path_parts):
-                project_name = path_parts[uploads_idx + 1]
         
         # 1. DWG 파서로 구조적 데이터 추출 (XREF 포함)
         logger.info(f"DWG 파일 파싱 시작: {dwg_file_path}")
@@ -134,8 +123,8 @@ class DWGMetadataExtractor:
         extracted_metadata = {}
         
         try:
-            # 기본 도면 정보 추출 (프로젝트명 포함)
-            basic_metadata = self._extract_basic_metadata(dwg_summary, raw_metadata, project_name)
+            # 기본 도면 정보 추출
+            basic_metadata = self._extract_basic_metadata(dwg_summary, raw_metadata)
             extracted_metadata.update(basic_metadata)
             
             # 도면 내용 분석
@@ -172,20 +161,18 @@ class DWGMetadataExtractor:
             return {}
     
     @trace_llm_call("dwg_basic_metadata_extraction", "llm")
-    def _extract_basic_metadata(self, dwg_summary: str, raw_metadata: Dict[str, Any], project_name: str = "Unknown") -> Dict[str, Any]:
+    def _extract_basic_metadata(self, dwg_summary: str, raw_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """기본 도면 메타데이터 추출"""
         
         prompt_template = """
 다음은 CAD 도면에서 추출한 구조적 정보입니다. 이 정보를 바탕으로 도면의 기본 메타데이터를 추출해주세요.
-
-프로젝트명: {project_name}
 
 {dwg_summary}
 
 다음 형식으로 JSON 응답해주세요:
 {{
     "project_info": {{
-        "project_name": "{project_name}",
+        "project_name": "프로젝트명 (추정)",
         "drawing_type": "도면 유형 (평면도, 입면도, 단면도, 상세도 등)",
         "drawing_purpose": "도면 목적",
         "scale": "축척 정보 (추정)",
@@ -202,10 +189,7 @@ class DWGMetadataExtractor:
 """
         
         try:
-            formatted_prompt = prompt_template.format(
-                project_name=project_name, 
-                dwg_summary=dwg_summary
-            )
+            formatted_prompt = prompt_template.format(dwg_summary=dwg_summary)
             response = self.llm.invoke(formatted_prompt)
             
             # JSON 파싱
@@ -379,7 +363,7 @@ class DWGMetadataExtractor:
             logger.error(f"건축적 특징 추출 실패: {e}")
             return {}
     
-    @trace_llm_call("dwg_xref_analysis", "parser")
+    @trace_llm_call("dwg_xref_analysis", "metadata_processing")
     def _analyze_xref_relationships(self, raw_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """XREF 관계 분석"""
         
@@ -420,7 +404,7 @@ class DWGMetadataExtractor:
             logger.error(f"XREF 관계 분석 실패: {e}")
             return {}
     
-    @trace_llm_call("dwg_technical_metadata", "parser")
+    @trace_llm_call("dwg_technical_metadata", "metadata_processing")
     def _extract_technical_metadata(self, raw_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """기술적 메타데이터 추출 (LLM 없이 직접 처리)"""
         
@@ -488,7 +472,7 @@ class DWGMetadataExtractor:
             logger.error(f"복잡도 점수 계산 실패: {e}")
             return 0.0
 
-    @trace_llm_call("dwg_project_extraction", "chain")
+    @trace_llm_call("dwg_project_extraction", "main_extraction")
     def extract_from_project(self, project_name: str, uploads_path: str = None) -> Dict[str, Any]:
         """
         프로젝트 단위로 모든 DWG 파일에서 메타데이터 추출
@@ -679,7 +663,7 @@ class DWGMetadataExtractor:
             logger.error(f"메타데이터 저장 실패: {e}")
             return False
 
-    @trace_llm_call("dwg_rag_content_generation", "chain")
+    @trace_llm_call("dwg_rag_content_generation", "content_processing")
     def generate_rag_content(self, metadata: Dict[str, Any]) -> str:
         """RAG 시스템용 콘텐츠 생성"""
         try:

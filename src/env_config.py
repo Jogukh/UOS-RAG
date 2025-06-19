@@ -85,6 +85,34 @@ class ModelConfig:
 
 
 @dataclass
+class LLMProviderConfig:
+    """LLM 제공자 설정 클래스"""
+    provider: str  # ollama, openai
+    # Ollama 설정
+    ollama_model: str
+    ollama_base_url: str
+    # OpenAI 설정
+    openai_api_key: str
+    openai_model: str
+    openai_base_url: str
+    # GPT-4.1-nano 설정
+    gpt4_nano_model: str
+    gpt4_nano_max_tokens: int
+    gpt4_nano_temperature: float
+
+
+@dataclass
+class EmbeddingConfig:
+    """임베딩 모델 설정 클래스"""
+    provider: str  # openai, ollama
+    # OpenAI 임베딩 설정
+    openai_model: str
+    openai_dimensions: int
+    # Ollama 임베딩 설정
+    ollama_model: str
+
+
+@dataclass
 class GenerationConfig:
     """생성 설정 클래스"""
     max_tokens: int
@@ -115,6 +143,32 @@ class EnvironmentConfig:
             kv_cache_dtype=get_env_str('KV_CACHE_DTYPE', 'auto')
         )
         
+        # LLM 제공자 설정
+        self.llm_provider_config = LLMProviderConfig(
+            provider=get_env_str('DEFAULT_LLM_PROVIDER', 'ollama'),
+            # Ollama 설정
+            ollama_model=get_env_str('OLLAMA_MODEL', 'gemma3:12b-it-qat'),
+            ollama_base_url=get_env_str('OLLAMA_BASE_URL', 'http://localhost:11434'),
+            # OpenAI 설정
+            openai_api_key=get_env_str('OPENAI_API_KEY', ''),
+            openai_model=get_env_str('OPENAI_MODEL', 'gpt-4o-mini-2024-07-18'),
+            openai_base_url=get_env_str('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+            # GPT-4.1-nano 설정
+            gpt4_nano_model=get_env_str('GPT4_NANO_MODEL', 'gpt-4o-mini-2024-07-18'),
+            gpt4_nano_max_tokens=get_env_int('GPT4_NANO_MAX_TOKENS', 4096),
+            gpt4_nano_temperature=get_env_float('GPT4_NANO_TEMPERATURE', 0.1)
+        )
+        
+        # 임베딩 설정
+        self.embedding_config = EmbeddingConfig(
+            provider=get_env_str('DEFAULT_EMBEDDING_PROVIDER', 'openai'),
+            # OpenAI 임베딩 설정
+            openai_model=get_env_str('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
+            openai_dimensions=get_env_int('OPENAI_EMBEDDING_DIMENSIONS', 1536),
+            # Ollama 임베딩 설정
+            ollama_model=get_env_str('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text')
+        )
+
         # 디바이스 설정
         self.device_config = DeviceConfig(
             device_type=self._detect_device_type(),
@@ -257,6 +311,13 @@ class EnvironmentConfig:
         """현재 설정 출력"""
         print("🔧 현재 환경 설정:")
         print(f"   모델: {self.model_config.model_name}")
+        print(f"   LLM 제공자: {self.llm_provider_config.provider}")
+        if self.llm_provider_config.provider == 'ollama':
+            print(f"   Ollama 모델: {self.llm_provider_config.ollama_model}")
+            print(f"   Ollama URL: {self.llm_provider_config.ollama_base_url}")
+        elif self.llm_provider_config.provider == 'openai':
+            print(f"   OpenAI 모델: {self.llm_provider_config.openai_model}")
+            print(f"   GPT-4 Nano 모델: {self.llm_provider_config.gpt4_nano_model}")
         print(f"   디바이스: {self.device_config.device_type}")
         print(f"   GPU 메모리 사용률: {self.device_config.gpu_memory_utilization}")
         print(f"   최대 시퀀스 길이: {self.model_config.max_model_len}")
@@ -267,7 +328,7 @@ class EnvironmentConfig:
         print(f"   LangSmith 추적: {self.langsmith_config['tracing']}")
         if self.langsmith_config['tracing']:
             print(f"   LangSmith 프로젝트: {self.langsmith_config['project']}")
-    
+
     def setup_langsmith(self):
         """LangSmith 환경변수 설정"""
         if self.langsmith_config['tracing']:
