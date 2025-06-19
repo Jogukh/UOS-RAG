@@ -153,7 +153,7 @@ VLM/
 │   └── prompt_manager.py         # 프롬프트 관리
 ├── prompts/                # AI 프롬프트
 │   ├── metadata_extraction.yaml      # 메타데이터 추출 프롬프트
-│   ├── pdf_metadata_extraction.yaml  # PDF 메타데이터 프롬프트
+│   ├── metadata_extraction.yaml      # 통합 메타데이터 추출 프롬프트
 │   └── rag_query.yaml              # RAG 질의 프롬프트
 ├── uploads/                # PDF 업로드 폴더
 └── chroma_db/             # ChromaDB 데이터

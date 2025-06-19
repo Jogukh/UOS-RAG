@@ -8,9 +8,8 @@
 prompts/
 ├── README.md                    # 이 파일
 ├── config.yaml                 # 프롬프트 시스템 설정
-├── metadata_extraction.yaml    # 메타데이터 추출 프롬프트
-├── relationship_inference.yaml # 관계 추론 프롬프트
-├── text_analysis.yaml         # 텍스트 분석 프롬프트
+├── metadata_extraction.yaml    # PDF/DWG 메타데이터 추출 프롬프트
+├── convert_to_self_query.yaml  # Self-Query 형태 변환 프롬프트
 ├── rag_query.yaml             # RAG 질의응답 프롬프트
 ├── system_test.yaml           # 시스템 테스트 프롬프트
 └── gemma_chat_wrapper.yaml    # Gemma 채팅 래퍼 프롬프트
@@ -63,22 +62,16 @@ vim prompts/metadata_extraction.yaml
 ## 🎯 프롬프트별 상세 설명
 
 ### metadata_extraction.yaml
-- **목적**: PDF 텍스트에서 건축 도면 메타데이터 추출
-- **사용 모듈**: `llm_metadata_extractor.py`
-- **출력**: JSON 형식의 구조화된 메타데이터
-- **핵심 파라미터**: `file_name`, `page_number`, `text_content`
+- **목적**: PDF/DWG 파일에서 건축 도면 메타데이터 추출
+- **사용 모듈**: `llm_metadata_extractor.py`, `extract_metadata_unified.py`
+- **출력**: JSON 형식의 구조화된 메타데이터 (Self-Query 호환)
+- **핵심 파라미터**: `file_name`, `page_number`, `text_content`, `html_content`, `tables_data`
 
-### relationship_inference.yaml
-- **목적**: 두 건축 도면 간의 관계 분석
-- **사용 모듈**: `llm_relationship_inferencer.py`
-- **출력**: 관계유형, 관계강도, 관계설명
-- **핵심 파라미터**: 두 도면의 각종 메타데이터
-
-### text_analysis.yaml
-- **목적**: 도면 텍스트에서 다른 도면 참조 찾기
-- **사용 모듈**: `llm_relationship_inferencer.py`
-- **출력**: 참조도면, 참조내용
-- **핵심 파라미터**: `drawing_text`, `other_drawings_info`
+### convert_to_self_query.yaml
+- **목적**: 기존 메타데이터를 Self-Query 형태로 변환
+- **사용 모듈**: `extract_metadata_unified.py`
+- **출력**: Self-Query Retriever 호환 JSON 형식
+- **핵심 파라미터**: `old_metadata_json`
 
 ### rag_query.yaml
 - **목적**: RAG 시스템 질의응답
@@ -87,9 +80,9 @@ vim prompts/metadata_extraction.yaml
 - **핵심 파라미터**: `retrieved_documents_text`, `query_text`
 
 ### system_test.yaml
-- **목적**: 시스템 연결 테스트
+- **목적**: LLM 연결 및 시스템 테스트
 - **사용 모듈**: 테스트 스크립트들
-- **출력**: 간단한 인사 응답
+- **출력**: 간단한 응답
 - **파라미터**: 없음
 
 ### gemma_chat_wrapper.yaml
@@ -141,8 +134,8 @@ python test_ollama_integration.py
 
 - `src/prompt_manager.py`: 프롬프트 로더 및 관리자
 - `src/llm_metadata_extractor.py`: 메타데이터 추출 모듈
-- `src/llm_relationship_inferencer.py`: 관계 추론 모듈
-- `query_rag.py`: RAG 질의응답 모듈
+- `extract_metadata_unified.py`: 통합 메타데이터 추출 스크립트
+- `query_rag.py`: RAG 질의응답 CLI 도구
 
 ---
 

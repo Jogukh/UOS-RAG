@@ -203,7 +203,7 @@ class UnifiedMetadataExtractor:
         
         if self.prompt_manager:
             return self.prompt_manager.format_prompt(
-                "pdf_metadata_extraction",
+                "metadata_extraction",
                 file_name=file_name,
                 page_number=1,  # 기본값
                 text_content=truncated_text,

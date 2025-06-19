@@ -105,7 +105,7 @@ class LLMMetadataExtractor:
             truncated_text += "..."
         
         return self.prompt_manager.format_prompt(
-            "pdf_metadata_extraction",
+            "metadata_extraction",
             file_name=file_name,
             page_number=page_number,
             text_content=truncated_text,
@@ -143,7 +143,7 @@ class LLMMetadataExtractor:
             tables_str = "\n".join(tables_list)
         
         return self.prompt_manager.format_prompt(
-            "pdf_metadata_extraction",
+            "metadata_extraction",
             file_name=file_name,
             page_number=page_number,
             text_content=truncated_text,

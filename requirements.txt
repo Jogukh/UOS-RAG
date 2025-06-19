@@ -25,6 +25,9 @@ PyMuPDF>=1.23.0  # fitz is included in PyMuPDF
 pdf2image>=1.16.0
 unstructured[pdf]>=0.15.0  # UnstructuredPDFLoader 지원
 
+# DWG/CAD Processing
+ezdxf>=1.3.0  # DWG/DXF 파일 처리
+
 # API & Web
 fastapi>=0.104.0
 uvicorn>=0.24.0

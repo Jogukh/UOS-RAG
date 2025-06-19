@@ -17,8 +17,7 @@ import logging
 class PromptType(Enum):
     """프롬프트 유형 분류"""
     METADATA_EXTRACTION = "metadata_extraction"
-    RELATIONSHIP_INFERENCE = "relationship_inference"
-    TEXT_ANALYSIS = "text_analysis"
+    CONVERT_TO_SELF_QUERY = "convert_to_self_query"
     RAG_QUERY = "rag_query"
     SYSTEM_PROMPT = "system_prompt"
 
@@ -78,8 +77,7 @@ class PromptManager:
             "default_encoding": "utf-8",
             "prompt_files": {
                 "metadata_extraction": "metadata_extraction.yaml",
-                "relationship_inference": "relationship_inference.yaml", 
-                "text_analysis": "text_analysis.yaml",
+                "convert_to_self_query": "convert_to_self_query.yaml",
                 "rag_query": "rag_query.yaml",
                 "system_test": "system_test.yaml",
                 "gemma_chat_wrapper": "gemma_chat_wrapper.yaml"
